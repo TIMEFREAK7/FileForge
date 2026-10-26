@@ -1,3 +1,6 @@
-# S3: the only components allowed to be exported. The share target and Open-with
-# activities join this list in Phase 1.
+# S3: the only components allowed to be exported, each with the reason.
+# Launcher, share target and Open-with target (one activity).
 io.github.timefreak7.fileforge.MainActivity
+# WorkManager's job service: must be exported for JobScheduler, but only the system can bind it
+# (android:permission="android.permission.BIND_JOB_SERVICE").
+androidx.work.impl.background.systemjob.SystemJobService

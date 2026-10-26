@@ -71,7 +71,7 @@ keyPassword=...
 
 `./gradlew :app:assembleRelease` then writes a signed `app/build/outputs/apk/release/app-release.apk`. Without the file, release builds stay unsigned. Copy the `.jks` and its passwords to a second offline place, such as a USB stick kept elsewhere. Losing the key means family phones cannot update the app without uninstalling it first.
 
-## Left for Phase 1
+## Carried into Phase 1
 
-- S11 (dependency verification metadata, lockfiles, OSV scan) is not in CI yet. Gradle's verification metadata records platform-specific build tools, so it has to be generated on every OS you build on. Tell me which OS you use with Android Studio before it is added.
-- The spike code in `app/.../spike` is throwaway: Phase 1 replaces it with the real parser service.
+- S11 is done: sha256 verification metadata, lockfiles and an OSV scan run in CI. Mac and Windows builds trust their own aapt2 jar until a build there adds its checksum.
+- The spike code is gone; Phase 1 replaced it with the real parser services.

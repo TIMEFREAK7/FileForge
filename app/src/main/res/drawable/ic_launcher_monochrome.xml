@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Themed-icon layer: one flat colour, no gradients; the two-arrow silhouette reads on its own. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M45,33h15l7,7v33a2,2 0,0 1,-2 2h-20a2,2 0,0 1,-2 -2v-38a2,2 0,0 1,2 -2z" />
+    <path
+        android:pathData="M28.5,48A26,26 0,0 1,77.5 44"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M72.5,43.5l11,0.2l-5.2,9.3z" />
+    <path
+        android:pathData="M79.5,60A26,26 0,0 1,30.5 64"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M35.5,64.5l-11,-0.2l5.2,-9.3z" />
+</vector>

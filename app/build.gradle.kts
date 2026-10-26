@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -13,8 +14,8 @@ android {
         applicationId = "io.github.timefreak7.fileforge"
         minSdk = 36
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.0.1"
+        versionCode = 2
+        versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -40,7 +41,8 @@ android {
     }
 
     buildFeatures {
-        aidl = true
+        compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -56,11 +58,16 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":engine-media"))
-    // Planned PDF engine; for now only the Phase 0 Devanagari check uses it.
-    implementation(libs.pdfbox.android)
-
-    androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.androidx.test.rules)
-    androidTestImplementation(libs.androidx.test.junit)
+    implementation(project(":jobs"))
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.core)
+    implementation(libs.activity.compose)
+    implementation(libs.lifecycle.runtime.compose)
+    implementation(libs.core.ktx)
+    // Self-tests (debug builds) generate HEIC and EXIF test files.
+    implementation(libs.heifwriter)
+    implementation(libs.exifinterface)
 }

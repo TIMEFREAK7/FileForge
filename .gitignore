@@ -24,3 +24,6 @@ signing.properties
 
 # Real family test files stay local (see spec: test corpus)
 corpus-private/
+
+# Python
+__pycache__/
