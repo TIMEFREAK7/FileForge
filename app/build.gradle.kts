@@ -57,9 +57,9 @@ kotlin {
 
 dependencies {
     implementation(project(":engine-media"))
+    // Planned PDF engine; for now only the Phase 0 Devanagari check uses it.
+    implementation(libs.pdfbox.android)
 
-    // Phase 0 spike only: the Devanagari check runs PDFBox from the test APK.
-    androidTestImplementation(libs.pdfbox.android)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.test.junit)

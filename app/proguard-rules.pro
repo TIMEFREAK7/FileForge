@@ -6,3 +6,6 @@
     public static int w(...);
     public static int e(...);
 }
+
+# PDFBox-Android: optional JPEG 2000 support (com.gemalto.jp2) is not bundled; JPX images report an error instead.
+-dontwarn com.gemalto.jp2.**

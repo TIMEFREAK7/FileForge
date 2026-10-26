@@ -9,15 +9,21 @@ The exit gate is in [spec.md](spec.md#build-phases-and-testing-gates).
 | --- | --- | --- |
 | S1 manifest check in CI, including a canary APK with INTERNET that must fail | `scripts/check_manifest.py`, `.github/workflows/ci.yml`, `tools/permission-canary` | Done: passes the app, rejects the canary. Also checks S2, S3 and S9 |
 | S16 secret scan | gitleaks job in CI | Done |
-| Isolated process round-trip: PdfRenderer page returned through SharedMemory | `app/.../spike/ParserServiceTest` | Built; run on the phone |
-| Isolated process cannot read app files | `ParserServiceTest.isolatedProcessCannotReadAppFiles` | Built; run on the phone |
-| Hardware H.264 encode from the isolated process vs the main process | `ParserServiceTest.hardwareEncodeMainVersusIsolated` | Built; run on the phone |
-| LAME built with the NDK, MP3 read back by Android | `engine-media`, `Mp3EncoderTest` | Builds for arm64 and x86_64; run on the phone |
-| PDFBox with Devanagari | `DevanagariPdfBoxTest` | Built; run on the phone and compare the images |
-| Android 16 PDF APIs: text, search, forms | `PdfPlatformApiTest` | Compiles against API 36 (the APIs exist); run on the phone |
+| Isolated process round-trip: PdfRenderer page returned through SharedMemory | `Phase0Checks.isolatedPdfRender` | Built; run on the phone |
+| Isolated process cannot read app files | `Phase0Checks.isolatedCannotReadAppFiles` | Built; run on the phone |
+| Hardware H.264 encode from the isolated process vs the main process | `Phase0Checks.encodeMainProcess`, `encodeIsolatedProcess` | Built; run on the phone |
+| LAME built with the NDK, MP3 read back by Android | `engine-media`, `Mp3EncoderTest`, `Phase0Checks.mp3RoundTrip` | Builds for arm64 and x86_64; run on the phone |
+| PDFBox with Devanagari | `Phase0Checks.devanagari` | Built; run on the phone and compare the images |
+| Android 16 PDF APIs: text, search, forms | `Phase0Checks.platformPdfApis` | Compiles against API 36 (the APIs exist); run on the phone |
+
+All checks live in `app/.../spike/Phase0Checks.kt`. The **Run Phase 0 checks** button in `MainActivity` and `Phase0ChecksTest` both call them.
 | 0b: Chaquopy + PyMuPDF + pdf2docx | — | Not started. PyPI has no Android build of PyMuPDF and Chaquopy's package index does not list it, so this needs PyMuPDF (and MuPDF) compiled for Android by us |
 
 ## Running the phone spikes
+
+**On the phone only:** install the debug APK, open FileForge and tap **Run Phase 0 checks**. Each check shows ✅ (passed), ❌ (failed) or ℹ️ (a finding that decides the plan), followed by the two Devanagari images. Screenshot the whole list.
+
+**From a computer** (same checks, as instrumented tests):
 
 1. On the OnePlus 13: Settings → About device → Version → tap Build number seven times, then turn on USB debugging in Developer options. Connect it by USB and accept the prompt.
 2. From the repository folder:
@@ -28,7 +34,7 @@ The exit gate is in [spec.md](spec.md#build-phases-and-testing-gates).
    ```
 
 3. The logcat lines are the results. Copy them into the table below.
-4. Open Files → Download → FileForge-phase0 on the phone and compare `devanagari-pdfbox.png` with `devanagari-android.png`. The Android one is correct. Broken conjuncts (क्ष, त्र, स्त) or a "ि" on the wrong side in the PDFBox image mean PDFBox does not shape Devanagari.
+4. For the Devanagari images, use the in-app button: the PDFBox image and the Android image appear one above the other. The Android one is correct. Broken conjuncts (क्ष, त्र, स्त) or a "ि" on the wrong side in the PDFBox image mean PDFBox does not shape Devanagari.
 
 ## Results (fill in after the phone run)
 
