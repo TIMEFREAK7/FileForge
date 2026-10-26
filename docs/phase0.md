@@ -36,19 +36,21 @@ All checks live in `app/.../spike/Phase0Checks.kt`. The **Run Phase 0 checks** b
 3. The logcat lines are the results. Copy them into the table below.
 4. For the Devanagari images, use the in-app button: the PDFBox image and the Android image appear one above the other. The Android one is correct. Broken conjuncts (क्ष, त्र, स्त) or a "ि" on the wrong side in the PDFBox image mean PDFBox does not shape Devanagari.
 
-## Results (fill in after the phone run)
+## Results — OnePlus 13, Oct 26, 2026 (in-app button)
 
-| Question | Result | What it decides |
+| Question | Result | Decision |
 | --- | --- | --- |
-| Service reports isolated | | S4 sanity |
-| Isolated read of app file | expect `denied` | S4 |
-| PdfRenderer page via SharedMemory, time for one 1080 px page | | Viewer and thumbnails can run isolated |
-| Hardware H.264, main process | expect `ok` | Control |
-| Hardware H.264, isolated process | | `failed` keeps the `:media` process plan; `ok` means media can run isolated too, and S4 tightens |
-| LAME MP3 round-trip | | MP3 output in v1 |
-| PDFBox Devanagari images match | | `no` keeps the stamp-as-image plan for complex scripts |
-| Platform PDF search finds "probe" | | Use it for the S13 redaction test |
-| Platform PDF form type and widgets | | Whether AcroForm filling can use Android's own API instead of PDFBox |
+| Service reports isolated | yes | S4 sandbox works as declared |
+| Isolated read of app file | denied (FileNotFoundException) | S4 holds: the parser process cannot see app files |
+| PdfRenderer page via SharedMemory | 1080×1528 in 178 ms, pixels correct | Viewer and thumbnails run in the isolated process, as planned |
+| Hardware H.264, main process | ok: `c2.qti.avc.encoder`, 3592 bytes from 30 frames | Control passes |
+| Hardware H.264, isolated process | the isolated process died (DeadObjectException); the app kept running | Hardware MediaCodec is not usable from an isolated process: media and HEIF encoding stay in the `:media` process. Also shows that a parser crash does not take the app down |
+| LAME MP3 round-trip | audio/mpeg, 1070 ms for 1000 ms of audio | MP3 output stays in v1. The extra ~70 ms is LAME's encoder padding; check gapless trimming in Phase 4 |
+| PDFBox Devanagari images match | no: क्ष shown as क्‌ष, "ि" placed after its consonant (रयि, हन्दिी), श्री broken | Stamp-as-image plan for complex scripts confirmed |
+| Platform PDF search finds "probe" | yes: text extracted, 1 match | Use Android's own search for the S13 redaction test |
+| Platform PDF form type and widgets | type 0, 0 widgets (the test PDF has no form) | Open: retest with a real AcroForm PDF in Phase 3 before choosing between Android's form API and PDFBox |
+
+**Exit gate:** met. CI rejects the INTERNET canary and has passed on every push; the process split is decided (no S4 change); minSdk 36 confirmed. 0b (pdf2docx) stays open, separately from v1.
 
 ## Release signing (on your own computer, never in the cloud)
 
