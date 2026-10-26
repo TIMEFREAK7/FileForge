@@ -33,7 +33,7 @@ Treat the branding image/concept as visual direction, not as a finished UI to re
   - shared-element transitions from a file in Recents or Folders into the donut, options sheet and editor;
   - predictive back, so swiping back previews the screen underneath and the liquid sheet follows the finger.
 
-  Glass blur uses Compose's built-in blur (RenderEffect), kept to a few surfaces on screen at once so scrolling stays smooth on the Oppo phone. With "Remove animations" on, every transition jumps straight to its end state and haptics remain.
+  Glass blur uses Compose's built-in blur (RenderEffect), kept to a few surfaces on screen at once so scrolling stays smooth on family phones slower than the OnePlus 13. With "Remove animations" on, every transition jumps straight to its end state and haptics remain.
 - **Icon deliverables:** an adaptive icon as vector layers (foreground and background, key shapes inside the central safe zone), plus a flat single-colour monochrome layer for Android's themed icons. Gradients and gloss do not carry into the monochrome layer, so the two-arrow silhouette must read on its own.
 - **No OEM names or marks:** no OEM skin names or marks appear in the app, its icon, its store or GitHub assets (this spec included, since the repository is public), or the brand asset prompt.
 
@@ -187,14 +187,14 @@ No phase starts until the one before it passes its gate. Performance figures are
 - **Fuzz pass:** 1,000 mutated files per format through each converter. Zero app crashes; a failed file shows an error and the app keeps working.
 - **Output check:** every output is reopened by a second reader (PdfRenderer for PDFs, ImageDecoder for images, Media3 for media) and checked for page count, dimensions or duration.
 - **Airplane-mode run:** the full manual checklist passes with the phone in airplane mode.
-- **Device matrix:** OnePlus 13 and the family Oppo phone, both on Android 16 or newer.
+- **Device matrix:** OnePlus 13 on Android 16 or newer. Before a family member gets the APK, the airplane-mode checklist also runs once on their phone.
 - **No data loss:** originals are never modified or deleted, checked by hash before and after every test job.
 
 | Phase | Scope | Exit gate (on top of the common gates) |
 | --- | --- | --- |
-| 0. Spikes | S1 manifest check in CI; isolated process round-trip including a PdfRenderer page returned through SharedMemory; MediaCodec hardware encode attempted from an isolated process; LAME NDK build; PDFBox text with Devanagari; check whether Android's own PDF APIs can replace parts of PDFBox and what minSdk they need; confirm the Oppo phone runs Android 16 | CI fails a test APK that has the INTERNET permission; the process split for each engine is decided and S4 updated if the MediaCodec result differs from the plan; minSdk confirmed or lowered |
+| 0. Spikes | S1 manifest check in CI; isolated process round-trip including a PdfRenderer page returned through SharedMemory; MediaCodec hardware encode attempted from an isolated process; LAME NDK build; PDFBox text with Devanagari; check whether Android's own PDF APIs can replace parts of PDFBox and what minSdk they need | CI fails a test APK that has the INTERNET permission; the process split for each engine is decided and S4 updated if the MediaCodec result differs from the plan; minSdk confirmed or lowered |
 | 0b. v2 spike (parallel, does not gate v1) | Chaquopy + PyMuPDF + pdf2docx install on Android | pdf2docx converts 10 sample PDFs on the phone, or v2 PDF → Word is re-planned |
-| 1. Core + images | Donut, share entry, jobs queue, Settings, all image conversions | 100 mixed photos convert with no crash; HEIC → JPG keeps orientation; location metadata absent unless kept on purpose; a shared file still converts after the app is swiped away before the job starts; donut and sheet motion runs without dropped frames on the Oppo phone, and with "Remove animations" on every transition jumps to its end state |
+| 1. Core + images | Donut, share entry, jobs queue, Settings, all image conversions | 100 mixed photos convert with no crash; HEIC → JPG keeps orientation; location metadata absent unless kept on purpose; a shared file still converts after the app is swiped away before the job starts; donut and sheet motion runs without dropped frames on the OnePlus 13, measured with Macrobenchmark frame timing, with frames well inside budget so slower family phones keep headroom; and with "Remove animations" on every transition jumps to its end state |
 | 2. PDF tools | Merge, split, compress, page tools, PDF ↔ images | 300-page PDF merges and splits without running out of memory; compressed scanned PDF at least 40% smaller and still readable; merging a protected PDF gives a protected output |
 | 3. PDF editor | Annotate, sign, forms, redact | Annotations and signatures show in a second PDF reader; a Devanagari text box and form value render correctly there; an XFA form shows a clean error; S13 redaction test passes |
 | 4. Media | Video and audio conversions | 10-minute 1080p video → 720p MP4 finishes within its timeout, plays, and keeps audio in sync; cancel mid-job leaves no partial file; MP3 and M4A outputs both play in a second player |
@@ -210,4 +210,4 @@ v1 release = Phases 0–4 passed, plus S12 and S15.
 - [x] App name: FileForge. Tagline: "Your Files, Your Way." Icon direction under Brand identity.
 - [x] Repository: public from day one, MIT licence; keystore never committed.
 - [ ] Will any friend who gets the app be on Android 15 or older? Unanswered; it decides the minSdk question above.
-- [ ] Is the family Oppo phone on Android 16? It is in the device matrix; checked in Phase 0.
+- [x] Test devices: the OnePlus 13 is the only test phone. Any later phone will be faster, so it is not a separate target.
