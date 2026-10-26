@@ -44,6 +44,25 @@ The exit gate is in [spec.md](spec.md#build-phases-and-testing-gates).
 | Platform PDF search finds "probe" | | Use it for the S13 redaction test |
 | Platform PDF form type and widgets | | Whether AcroForm filling can use Android's own API instead of PDFBox |
 
+## Release signing (on your own computer, never in the cloud)
+
+The release key must never leave your machine (S15, S16). Create it once:
+
+```
+keytool -genkeypair -keystore ~/fileforge-release.jks -alias fileforge -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Then create `keystore.properties` in the repository root (git-ignored):
+
+```
+storeFile=/full/path/to/fileforge-release.jks
+storePassword=...
+keyAlias=fileforge
+keyPassword=...
+```
+
+`./gradlew :app:assembleRelease` then writes a signed `app/build/outputs/apk/release/app-release.apk`. Without the file, release builds stay unsigned. Copy the `.jks` and its passwords to a second offline place, such as a USB stick kept elsewhere. Losing the key means family phones cannot update the app without uninstalling it first.
+
 ## Left for Phase 1
 
 - S11 (dependency verification metadata, lockfiles, OSV scan) is not in CI yet. Gradle's verification metadata records platform-specific build tools, so it has to be generated on every OS you build on. Tell me which OS you use with Android Studio before it is added.
