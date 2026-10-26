@@ -187,12 +187,12 @@ No phase starts until the one before it passes its gate. Performance figures are
 - **Fuzz pass:** 1,000 mutated files per format through each converter. Zero app crashes; a failed file shows an error and the app keeps working.
 - **Output check:** every output is reopened by a second reader (PdfRenderer for PDFs, ImageDecoder for images, Media3 for media) and checked for page count, dimensions or duration.
 - **Airplane-mode run:** the full manual checklist passes with the phone in airplane mode.
-- **Device matrix:** OnePlus 13 on Android 16 or newer. Before a family member gets the APK, the airplane-mode checklist also runs once on their phone.
+- **Device matrix:** OnePlus 13 on Android 16 or newer, plus an Android 16 emulator in CI once the OnePlus 13 moves past Android 16, so the oldest supported version stays tested. Before a family member gets the APK, the airplane-mode checklist also runs once on their phone.
 - **No data loss:** originals are never modified or deleted, checked by hash before and after every test job.
 
 | Phase | Scope | Exit gate (on top of the common gates) |
 | --- | --- | --- |
-| 0. Spikes | S1 manifest check in CI; isolated process round-trip including a PdfRenderer page returned through SharedMemory; MediaCodec hardware encode attempted from an isolated process; LAME NDK build; PDFBox text with Devanagari; check whether Android's own PDF APIs can replace parts of PDFBox and what minSdk they need | CI fails a test APK that has the INTERNET permission; the process split for each engine is decided and S4 updated if the MediaCodec result differs from the plan; minSdk confirmed or lowered |
+| 0. Spikes | S1 manifest check in CI; isolated process round-trip including a PdfRenderer page returned through SharedMemory; MediaCodec hardware encode attempted from an isolated process; LAME NDK build; PDFBox text with Devanagari; check whether Android's own PDF APIs can replace parts of PDFBox on Android 16 | CI fails a test APK that has the INTERNET permission; the process split for each engine is decided and S4 updated if the MediaCodec result differs from the plan |
 | 0b. v2 spike (parallel, does not gate v1) | Chaquopy + PyMuPDF + pdf2docx install on Android | pdf2docx converts 10 sample PDFs on the phone, or v2 PDF → Word is re-planned |
 | 1. Core + images | Donut, share entry, jobs queue, Settings, all image conversions | 100 mixed photos convert with no crash; HEIC → JPG keeps orientation; location metadata absent unless kept on purpose; a shared file still converts after the app is swiped away before the job starts; donut and sheet motion runs without dropped frames on the OnePlus 13, measured with Macrobenchmark frame timing, with frames well inside budget so slower family phones keep headroom; and with "Remove animations" on every transition jumps to its end state |
 | 2. PDF tools | Merge, split, compress, page tools, PDF ↔ images | 300-page PDF merges and splits without running out of memory; compressed scanned PDF at least 40% smaller and still readable; merging a protected PDF gives a protected output |
@@ -205,9 +205,9 @@ v1 release = Phases 0–4 passed, plus S12 and S15.
 
 ## Open questions
 
-- [ ] Minimum Android version: currently 16 (minSdk 36). Nothing in the v1 feature list needs API 36; confirm or lower it after the Phase 0 PDF API check.
+- [x] Minimum Android version: 16 (minSdk 36). Every family phone is on Android 16 or newer, so nothing is lost by it.
 - [x] Audio output: MP3 and M4A both in v1.
 - [x] App name: FileForge. Tagline: "Your Files, Your Way." Icon direction under Brand identity.
 - [x] Repository: public from day one, MIT licence; keystore never committed.
-- [ ] Will any friend who gets the app be on Android 15 or older? Unanswered; it decides the minSdk question above.
+- [x] Who gets the app: family only, all on Android 16 or newer. A friend on Android 15 or older cannot install it, by design.
 - [x] Test devices: the OnePlus 13 is the only test phone. Any later phone will be faster, so it is not a separate target.
