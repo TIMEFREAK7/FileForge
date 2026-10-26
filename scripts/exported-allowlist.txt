@@ -1,0 +1,3 @@
+# S3: the only components allowed to be exported. The share target and Open-with
+# activities join this list in Phase 1.
+io.github.timefreak7.fileforge.MainActivity
