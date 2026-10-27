@@ -41,12 +41,13 @@ class SelfTest(
 
     suspend fun run(fuzzPerFormat: Int) {
         val n = formats.size
-        total = n * (n + 2) + 2 + 6 + 5 + PHOTOS + fuzzPerFormat * n + 2
+        total = n * (n + 2) + 2 + 6 + 5 + SPEED_RUNS * 2 + PHOTOS + fuzzPerFormat * n + 2
         ImageEngineClient(context).use { engine ->
             section("Converting every format") { conversions(engine) }
             section("Rotated photos") { orientation(engine) }
             section("Photo details") { metadata(engine) }
             section("Damaged files") { damagedFiles(engine) }
+            section("Speed check") { speed(engine) }
             section("100 mixed photos") { hundredPhotos(engine) }
             section("Fuzz pass") { fuzz(engine, fuzzPerFormat) }
         }
@@ -155,6 +156,40 @@ class SelfTest(
             }
             tick()
         }
+    }
+
+    /**
+     * Same 12 MP JPG → JPG conversion timed in the converter process and directly in the app.
+     * A large gap means the parser processes get less CPU than the app, not that converting is slow.
+     */
+    private suspend fun speed(engine: ImageEngineClient) {
+        val input = write(pattern(4000, 3000), Format.JPG, "speed")
+        val out = File(dir, "speed-out.jpg")
+        val service = (1..SPEED_RUNS).map {
+            val t = System.currentTimeMillis()
+            engine.convert(input, Format.JPG, out, Format.JPG, Preset())
+            tick()
+            System.currentTimeMillis() - t
+        }
+        var decodeMs = 0L
+        var encodeMs = 0L
+        repeat(SPEED_RUNS) {
+            // Debug-only comparison on our own generated file; the app never decodes user files itself.
+            val t0 = System.currentTimeMillis()
+            val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(input)) { d, _, _ -> d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE }
+            val t1 = System.currentTimeMillis()
+            out.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            encodeMs += System.currentTimeMillis() - t1
+            decodeMs += t1 - t0
+            bitmap.recycle()
+            tick()
+        }
+        val inApp = (decodeMs + encodeMs) / SPEED_RUNS
+        report(
+            null,
+            "Speed, 12 MP JPG → JPG: converter process ${service.joinToString(" / ")} ms; " +
+                "in the app $inApp ms (decode ${decodeMs / SPEED_RUNS}, encode ${encodeMs / SPEED_RUNS})",
+        )
     }
 
     /** Phase 1 gate: 100 mixed photos convert with no crash. */
@@ -282,6 +317,7 @@ class SelfTest(
 
     private companion object {
         const val PHOTOS = 100
+        const val SPEED_RUNS = 3
     }
 
     private fun describe(o: Outcome) = when (o) {

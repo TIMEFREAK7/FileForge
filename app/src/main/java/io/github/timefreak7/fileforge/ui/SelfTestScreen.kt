@@ -92,7 +92,7 @@ fun SelfTestScreen(onClose: () -> Unit) {
     }
 
     val failed = lines.filter { it.ok == false }
-    val key = lines.filter { it.ok != false && (it.text.startsWith("100 mixed") || it.text.startsWith("Fuzz") || it.text.startsWith("S7") || it.text.startsWith("S8")) }
+    val key = lines.filter { it.ok != false && (it.text.startsWith("100 mixed") || it.text.startsWith("Speed") || it.text.startsWith("Fuzz") || it.text.startsWith("S7") || it.text.startsWith("S8")) }
     val elapsed = (now - startedAt).coerceAtLeast(0) / 1000
 
     Surface(Modifier.fillMaxSize()) {
@@ -104,7 +104,7 @@ fun SelfTestScreen(onClose: () -> Unit) {
             item { Text("Self-tests", style = MaterialTheme.typography.headlineMedium) }
             item {
                 Text(
-                    "Quick takes a few minutes. Full adds the 1,000-file fuzz pass per format and can take 20–40 minutes. The screen stays on while it runs.",
+                    "Quick takes a few minutes. Full adds the 1,000-file fuzz pass per format and can take 20–40 minutes. The screen stays on by itself; don't press the power button or leave the app, or Android pauses the test.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
