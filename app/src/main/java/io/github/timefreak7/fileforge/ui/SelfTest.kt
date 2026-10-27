@@ -24,22 +24,48 @@ import kotlin.random.Random
  * Phase 1 gate checks that need a real phone, run from Settings in debug builds. Uses synthetic and
  * generated files only (spec: test corpus), in app cache; nothing is written to the output folder.
  */
-class SelfTest(private val context: Context, private val report: (Boolean?, String) -> Unit) {
+class SelfTest(
+    private val context: Context,
+    private val report: (Boolean?, String) -> Unit,
+    /** Called after every unit of work: (done, total, current step). */
+    private val progress: (Int, Int, String) -> Unit,
+) {
     private val dir = File(context.cacheDir, "selftest").apply { deleteRecursively(); mkdirs() }
     private val heic = ImageEngineClient.heicEncodeAvailable
     private val formats = Format.entries.filter { it != Format.HEIC || heic }
+    private var done = 0
+    private var total = 0
+    private var step = ""
+
+    private fun tick() = progress(++done, total, step)
 
     suspend fun run(fuzzPerFormat: Int) {
+        val n = formats.size
+        total = n * (n + 2) + 2 + 6 + 5 + PHOTOS + fuzzPerFormat * n + 2
         ImageEngineClient(context).use { engine ->
-            conversions(engine)
-            orientation(engine)
-            metadata(engine)
-            damagedFiles(engine)
-            hundredPhotos(engine)
-            fuzz(engine, fuzzPerFormat)
+            section("Converting every format") { conversions(engine) }
+            section("Rotated photos") { orientation(engine) }
+            section("Photo details") { metadata(engine) }
+            section("Damaged files") { damagedFiles(engine) }
+            section("100 mixed photos") { hundredPhotos(engine) }
+            section("Fuzz pass") { fuzz(engine, fuzzPerFormat) }
         }
-        securityChecks()
+        section("Security checks") { securityChecks() }
         dir.deleteRecursively()
+        progress(total, total, "Done")
+    }
+
+    /** One section failing (an exception, not a failed check) is reported and the rest still run. */
+    private suspend fun section(name: String, block: suspend () -> Unit) {
+        step = name
+        progress(done, total, step)
+        try {
+            block()
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            report(false, "$name stopped early: ${t.javaClass.simpleName}: ${t.message}")
+        }
     }
 
     /** Every format to every format, reopened by a second reader with the expected size. */
@@ -52,11 +78,14 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
                 val outcome = engine.convert(input, from, out, to, Preset(maxSide = 0))
                 val size = reopen(out)
                 report(outcome is Outcome.Success && size == 1200 to 800, "${from.label} → ${to.label}: ${describe(outcome)}, reopened ${size?.let { "${it.first}×${it.second}" } ?: "failed"}")
+                tick()
             }
             val resized = File(dir, "small.jpg")
             engine.convert(input, from, resized, Format.JPG, Preset(maxSide = 600))
             report(reopen(resized) == 600 to 400, "${from.label} resized to 600 px: ${reopen(resized)}")
+            tick()
             report(sha256(input) == before, "${from.label} original unchanged after converting (hash)")
+            tick()
         }
     }
 
@@ -68,6 +97,7 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
         val out = File(dir, "rot-out.png")
         engine.convert(jpeg, Format.JPG, out, Format.PNG, Preset())
         report(reopen(out) == 800 to 1200, "Rotated JPG → PNG keeps orientation: ${reopen(out)} (expect 800×1200)")
+        tick()
         if (heic) {
             val h = File(dir, "rot.heic")
             HeifWriter.Builder(h.absolutePath, 1200, 800, HeifWriter.INPUT_MODE_BITMAP).setRotation(90).build().use {
@@ -79,6 +109,7 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
         } else {
             report(null, "No hardware HEVC encoder: HEIC output is hidden on this phone")
         }
+        tick()
     }
 
     /** Location is gone unless kept on purpose. */
@@ -94,10 +125,12 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
             val stripped = File(dir, "strip.${to.extension}")
             engine.convert(photo, Format.JPG, stripped, to, Preset(keepMetadata = false))
             report(ExifInterface(stripped).latLong == null, "${to.label}: location removed by default")
+            tick()
             val kept = File(dir, "keep.${to.extension}")
             val outcome = engine.convert(photo, Format.JPG, kept, to, Preset(keepMetadata = true))
             val latLong = ExifInterface(kept).latLong
             report(latLong != null && kotlin.math.abs(latLong[0] - 48.8584) < 0.001, "${to.label}: location kept when asked (${describe(outcome)})")
+            tick()
         }
     }
 
@@ -116,10 +149,11 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
             val sniffed = Sniffer.sniff(bytes.copyOf(minOf(bytes.size, Sniffer.HEADER_BYTES)))
             if (sniffed == null) {
                 report(true, "$name: rejected before converting (not a supported image)")
-                continue
+            } else {
+                val outcome = engine.convert(f, sniffed, File(dir, "bad-out.png"), Format.PNG, Preset())
+                report(outcome is Outcome.Failure, "$name: ${describe(outcome)}")
             }
-            val outcome = engine.convert(f, sniffed, File(dir, "bad-out.png"), Format.PNG, Preset())
-            report(outcome is Outcome.Failure, "$name: ${describe(outcome)}")
+            tick()
         }
     }
 
@@ -129,21 +163,36 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
         var ok = 0
         val failures = mutableListOf<String>()
         val start = System.currentTimeMillis()
-        repeat(100) { i ->
+        var convertMs = 0L
+        repeat(PHOTOS) { i ->
             val from = formats[i % formats.size]
-            val w = random.nextInt(400, 4000)
-            val h = random.nextInt(400, 3000)
-            val input = write(pattern(w, h), from, "p")
-            val outcome = engine.convert(input, from, File(dir, "p-out.jpg"), Format.JPG, Preset(quality = 85))
-            if (outcome is Outcome.Success) ok++ else failures += "#$i ${from.label} ${w}×$h: ${describe(outcome)}"
+            // Even sizes: some HEVC encoders reject odd dimensions when the test files are made.
+            val w = random.nextInt(200, 2000) * 2
+            val h = random.nextInt(200, 1500) * 2
+            step = "100 mixed photos: #${i + 1} ${from.label} ${w}×$h"
+            try {
+                val input = write(pattern(w, h), from, "p")
+                val t0 = System.currentTimeMillis()
+                val outcome = engine.convert(input, from, File(dir, "p-out.jpg"), Format.JPG, Preset(quality = 85))
+                convertMs += System.currentTimeMillis() - t0
+                if (outcome is Outcome.Success) ok++ else failures += "#${i + 1} ${from.label} ${w}×$h: ${describe(outcome)}"
+            } catch (e: Exception) {
+                failures += "#${i + 1} ${from.label} ${w}×$h: test file could not be made (${e.javaClass.simpleName})"
+            }
+            tick()
         }
         val seconds = (System.currentTimeMillis() - start) / 1000
-        report(ok == 100, "100 mixed photos → JPG: $ok converted in $seconds s" + failures.take(3).joinToString("") { "\n$it" })
+        report(
+            ok == PHOTOS,
+            "100 mixed photos → JPG: $ok converted; ${convertMs / 1000} s converting, $seconds s including making the test files" +
+                failures.take(3).joinToString("") { "\n$it" },
+        )
     }
 
     /** Spec gate: mutated files through each converter; zero app crashes. */
     private suspend fun fuzz(engine: ImageEngineClient, perFormat: Int) {
         for (from in formats) {
+            step = "Fuzz pass: ${from.label}"
             val seed = write(pattern(640, 480), from, "seed").readBytes()
             val random = Random(from.ordinal + 7)
             var converted = 0
@@ -158,6 +207,7 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
                 val sniffed = Sniffer.sniff(data.copyOf(minOf(data.size, Sniffer.HEADER_BYTES)))
                 if (sniffed == null) {
                     rejected++
+                    tick()
                     return@repeat
                 }
                 when (val o = engine.convert(f, sniffed, File(dir, "fuzz-out.png"), Format.PNG, Preset())) {
@@ -168,6 +218,7 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
                         else -> rejected++
                     }
                 }
+                tick()
             }
             // Reaching this line means the app survived every file.
             report(true, "Fuzz ${from.label} × $perFormat: app survived. $converted converted, $rejected rejected cleanly, $crashed crashed the converter (recovered), $timedOut timed out")
@@ -181,10 +232,12 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
             hostile.all { FileNames.sanitize(it).let { s -> '/' !in s && '\\' !in s && ".." !in s && s.none(Char::isISOControl) } },
             "S7: hostile names sanitised",
         )
+        tick()
         val share = Outputs.shareIntent(Uri.parse("content://test/doc"), "image/jpeg")
         val inner = share.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)!!
         val readOnly = { i: Intent -> i.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0 && i.flags and Intent.FLAG_GRANT_WRITE_URI_PERMISSION == 0 }
         report(readOnly(share) && readOnly(inner), "S8: share grants read-only access to one file")
+        tick()
     }
 
     private fun write(bitmap: Bitmap, format: Format, name: String): File {
@@ -226,6 +279,10 @@ class SelfTest(private val context: Context, private val report: (Boolean?, Stri
     }.getOrNull()
 
     private fun sha256(f: File) = MessageDigest.getInstance("SHA-256").digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+
+    private companion object {
+        const val PHOTOS = 100
+    }
 
     private fun describe(o: Outcome) = when (o) {
         is Outcome.Success -> "ok"
