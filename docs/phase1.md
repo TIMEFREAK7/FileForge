@@ -35,6 +35,21 @@ Install the debug APK over the old one, then:
 
 Send screenshots of steps 2 and 7, and note anything that looked wrong in the others.
 
+## Results — OnePlus 13, Oct 27, 2026
+
+| Gate item | Result |
+| --- | --- |
+| Self-tests, Full | 44 of 44 passed in 1 min 39 s |
+| 100 mixed photos convert with no crash | 100 of 100, 9 s converting |
+| Fuzz pass, 1,000 mutated files per format | JPG, PNG, WebP, HEIC: zero app crashes, zero converter crashes, zero timeouts |
+| HEIC → JPG keeps orientation | Passed (self-test) |
+| Location absent unless kept on purpose | Passed for JPG, WebP and PNG (self-test) |
+| Originals unchanged (hash) | Passed for every format |
+| S7, S8 | Passed |
+| Real photos converted from the app | Camera photo → HEIC and screenshot → JPG appear in Recents |
+| Speed, 12 MP JPG → JPG | ~210 ms (decode 80 ms isolated + encode 130 ms in `:media`); was 5.1 s with encoding in the isolated process |
+| Swiped-away job, motion bars, airplane mode, TalkBack | Not yet checked |
+
 ## Not done yet (honest gaps)
 
 - **Liquid-glass look, shape morphing and shared-element transitions** from the spec's motion system are not built. Phase 1 has the palette, the springy donut and the standard Material 3 components. The full look is better added once the screens are stable, so it isn't reworked twice.

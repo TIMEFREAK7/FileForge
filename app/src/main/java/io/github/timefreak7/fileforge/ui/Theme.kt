@@ -39,6 +39,10 @@ private val Light = lightColorScheme(
     surfaceContainerHigh = Color(0xFFE1ECF0),
     outline = Color(0xFF6F8791),
     error = Color(0xFFB3261E),
+    // Snackbars use the inverse colours; unset, they fall back to Material's default purple.
+    inverseSurface = Navy,
+    inverseOnSurface = Color(0xFFE2EEF2),
+    inversePrimary = Color(0xFF5EEAD4),
 )
 
 private val Dark = darkColorScheme(
@@ -64,6 +68,9 @@ private val Dark = darkColorScheme(
     surfaceContainerHigh = Color(0xFF172C36),
     outline = Color(0xFF82979F),
     error = Color(0xFFF2B8B5),
+    inverseSurface = Color(0xFFE2EEF2),
+    inverseOnSurface = Navy,
+    inversePrimary = Teal,
 )
 
 /**
