@@ -28,7 +28,8 @@ import kotlin.coroutines.resume
 class ImageEngineClient(private val context: Context) : Closeable {
 
     sealed interface Outcome {
-        data class Success(val width: Int, val height: Int) : Outcome
+        /** [engineMs] and [cpuset] describe the converter process, for the self-test's speed check. */
+        data class Success(val width: Int, val height: Int, val engineMs: Long = 0, val cpuset: String = "") : Outcome
         data class Failure(val message: String) : Outcome
     }
 
@@ -91,7 +92,7 @@ class ImageEngineClient(private val context: Context) : Closeable {
                 return Outcome.Failure("The image converted, but its photo details could not be saved.")
             }
         }
-        return Outcome.Success(bundle.getInt("w"), bundle.getInt("h"))
+        return Outcome.Success(bundle.getInt("w"), bundle.getInt("h"), bundle.getLong("ms"), bundle.getString("cpuset").orEmpty())
     }
 
     private suspend fun bind(service: Class<out ImageEngineService>): Connection? =
@@ -111,7 +112,9 @@ class ImageEngineClient(private val context: Context) : Closeable {
                     if (cont.isActive) cont.resume(null)
                 }
             }
-            if (!context.bindService(Intent(context, service), conn, Context.BIND_AUTO_CREATE)) {
+            // BIND_IMPORTANT: the converter runs at its client's priority. Without it the phone treated the
+            // parser processes as background work and a 12 MP photo took ~75x longer (Phase 1 speed check).
+            if (!context.bindService(Intent(context, service), conn, Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT)) {
                 context.unbindService(conn)
                 cont.resume(null)
             }

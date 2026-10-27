@@ -6,7 +6,9 @@ import android.os.Bundle
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import android.os.SystemClock
 import io.github.timefreak7.fileforge.core.Format
+import java.io.File
 
 /** The image engine's binder. Declared twice in the manifest so it runs in two kinds of process. */
 abstract class ImageEngineService : Service() {
@@ -21,12 +23,16 @@ abstract class ImageEngineService : Service() {
             maxSide: Int,
             keepMetadata: Boolean,
         ): Bundle = try {
+            val start = SystemClock.elapsedRealtime()
             val target = Format.fromMime(targetMime) ?: throw ConversionException("Unknown output format.")
             val (w, h) = ImageConverter.convert(input, output, target, quality, maxSide)
             Bundle().apply {
                 putBoolean("ok", true)
                 putInt("w", w)
                 putInt("h", h)
+                // Diagnostics for the self-test's speed check: time spent here, and the CPU group Android gave us.
+                putLong("ms", SystemClock.elapsedRealtime() - start)
+                putString("cpuset", runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("unknown"))
                 // HEIC output: ExifInterface cannot write HEIF, so metadata is always dropped there.
                 if (keepMetadata && target != Format.HEIC) {
                     putBundle("exif", Bundle().apply { ImageConverter.readMetadata(input).forEach { (tag, value) -> putString(tag, value) } })

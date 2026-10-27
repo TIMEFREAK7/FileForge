@@ -165,12 +165,15 @@ class SelfTest(
     private suspend fun speed(engine: ImageEngineClient) {
         val input = write(pattern(4000, 3000), Format.JPG, "speed")
         val out = File(dir, "speed-out.jpg")
-        val service = (1..SPEED_RUNS).map {
+        val outcomes = (1..SPEED_RUNS).map {
             val t = System.currentTimeMillis()
-            engine.convert(input, Format.JPG, out, Format.JPG, Preset())
+            val o = engine.convert(input, Format.JPG, out, Format.JPG, Preset())
             tick()
-            System.currentTimeMillis() - t
+            (System.currentTimeMillis() - t) to o
         }
+        val service = outcomes.map { it.first }
+        val inside = outcomes.map { (it.second as? Outcome.Success)?.engineMs ?: -1 }
+        val cpuset = (outcomes.last().second as? Outcome.Success)?.cpuset ?: "unknown"
         var decodeMs = 0L
         var encodeMs = 0L
         repeat(SPEED_RUNS) {
@@ -187,8 +190,10 @@ class SelfTest(
         val inApp = (decodeMs + encodeMs) / SPEED_RUNS
         report(
             null,
-            "Speed, 12 MP JPG → JPG: converter process ${service.joinToString(" / ")} ms; " +
-                "in the app $inApp ms (decode ${decodeMs / SPEED_RUNS}, encode ${encodeMs / SPEED_RUNS})",
+            "Speed, 12 MP JPG → JPG: converter process ${service.joinToString(" / ")} ms " +
+                "(inside the converter ${inside.joinToString(" / ")} ms, CPU group $cpuset); " +
+                "in the app $inApp ms (decode ${decodeMs / SPEED_RUNS}, encode ${encodeMs / SPEED_RUNS}, " +
+                "CPU group ${runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("unknown")})",
         )
     }
 
