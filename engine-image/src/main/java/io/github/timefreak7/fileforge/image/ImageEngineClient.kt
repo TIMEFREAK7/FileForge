@@ -29,7 +29,14 @@ class ImageEngineClient(private val context: Context) : Closeable {
 
     sealed interface Outcome {
         /** [engineMs] and [cpuset] describe the converter process, for the self-test's speed check. */
-        data class Success(val width: Int, val height: Int, val engineMs: Long = 0, val cpuset: String = "") : Outcome
+        data class Success(
+            val width: Int,
+            val height: Int,
+            val engineMs: Long = 0,
+            val decodeMs: Long = 0,
+            val encodeMs: Long = 0,
+            val cpuset: String = "",
+        ) : Outcome
         data class Failure(val message: String) : Outcome
     }
 
@@ -38,8 +45,16 @@ class ImageEngineClient(private val context: Context) : Closeable {
     private val connections = ConcurrentHashMap<Class<out ImageEngineService>, Connection>()
 
     /** Converts [input] (detected as [inputFormat]) into [output]. Never throws for a bad file. */
-    suspend fun convert(input: File, inputFormat: Format, output: File, target: Format, preset: Preset): Outcome {
-        val service = if (inputFormat == Format.HEIC || target == Format.HEIC) {
+    /** [inMediaProcess] forces the ":media" process; the self-test uses it to compare the two processes. */
+    suspend fun convert(
+        input: File,
+        inputFormat: Format,
+        output: File,
+        target: Format,
+        preset: Preset,
+        inMediaProcess: Boolean = false,
+    ): Outcome {
+        val service = if (inMediaProcess || inputFormat == Format.HEIC || target == Format.HEIC) {
             MediaImageService::class.java
         } else {
             IsolatedImageService::class.java
@@ -92,7 +107,14 @@ class ImageEngineClient(private val context: Context) : Closeable {
                 return Outcome.Failure("The image converted, but its photo details could not be saved.")
             }
         }
-        return Outcome.Success(bundle.getInt("w"), bundle.getInt("h"), bundle.getLong("ms"), bundle.getString("cpuset").orEmpty())
+        return Outcome.Success(
+            bundle.getInt("w"),
+            bundle.getInt("h"),
+            bundle.getLong("ms"),
+            bundle.getLong("decodeMs"),
+            bundle.getLong("encodeMs"),
+            bundle.getString("cpuset").orEmpty(),
+        )
     }
 
     private suspend fun bind(service: Class<out ImageEngineService>): Connection? =

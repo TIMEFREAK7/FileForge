@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import androidx.exifinterface.media.ExifInterface
 import androidx.heifwriter.HeifWriter
 import io.github.timefreak7.fileforge.core.Format
@@ -33,15 +34,20 @@ object ImageConverter {
         ExifInterface.TAG_GPS_TIMESTAMP, ExifInterface.TAG_GPS_DATESTAMP,
     )
 
-    /** Returns the output size. Throws [ConversionException] with a message for the user. */
+    /** Output size, plus stage timings for the self-test's speed check. */
+    class Result(val width: Int, val height: Int, val decodeMs: Long, val encodeMs: Long)
+
+    /** Throws [ConversionException] with a message for the user. */
     fun convert(
         input: ParcelFileDescriptor,
         output: ParcelFileDescriptor,
         target: Format,
         quality: Int,
         maxSide: Int,
-    ): Pair<Int, Int> {
+    ): Result {
+        val t0 = SystemClock.elapsedRealtime()
         val bitmap = decode(input, maxSide)
+        val t1 = SystemClock.elapsedRealtime()
         try {
             when (target) {
                 Format.JPG -> compress(withWhiteBackground(bitmap), Bitmap.CompressFormat.JPEG, quality, output)
@@ -49,7 +55,7 @@ object ImageConverter {
                 Format.WEBP -> compress(bitmap, Bitmap.CompressFormat.WEBP_LOSSY, quality, output)
                 Format.HEIC -> encodeHeic(bitmap, quality, output)
             }
-            return bitmap.width to bitmap.height
+            return Result(bitmap.width, bitmap.height, t1 - t0, SystemClock.elapsedRealtime() - t1)
         } finally {
             bitmap.recycle()
         }

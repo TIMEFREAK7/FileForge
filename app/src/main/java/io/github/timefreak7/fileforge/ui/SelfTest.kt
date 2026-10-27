@@ -8,12 +8,14 @@ import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.graphics.Paint
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import androidx.exifinterface.media.ExifInterface
 import androidx.heifwriter.HeifWriter
 import io.github.timefreak7.fileforge.core.FileNames
 import io.github.timefreak7.fileforge.core.Format
 import io.github.timefreak7.fileforge.core.Preset
 import io.github.timefreak7.fileforge.core.Sniffer
+import io.github.timefreak7.fileforge.image.ImageConverter
 import io.github.timefreak7.fileforge.image.ImageEngineClient
 import io.github.timefreak7.fileforge.image.ImageEngineClient.Outcome
 import java.io.File
@@ -41,7 +43,7 @@ class SelfTest(
 
     suspend fun run(fuzzPerFormat: Int) {
         val n = formats.size
-        total = n * (n + 2) + 2 + 6 + 5 + SPEED_RUNS * 2 + PHOTOS + fuzzPerFormat * n + 2
+        total = n * (n + 2) + 2 + 6 + 5 + SPEED_RUNS * 4 + PHOTOS + fuzzPerFormat * n + 2
         ImageEngineClient(context).use { engine ->
             section("Converting every format") { conversions(engine) }
             section("Rotated photos") { orientation(engine) }
@@ -159,41 +161,50 @@ class SelfTest(
     }
 
     /**
-     * Same 12 MP JPG → JPG conversion timed in the converter process and directly in the app.
-     * A large gap means the parser processes get less CPU than the app, not that converting is slow.
+     * The same 12 MP JPG → JPG conversion timed four ways, split into decode and encode, to find
+     * where the time goes: the isolated process, the ":media" process, the converter's own code run in
+     * the app, and a plain decode/encode in the app.
      */
     private suspend fun speed(engine: ImageEngineClient) {
         val input = write(pattern(4000, 3000), Format.JPG, "speed")
         val out = File(dir, "speed-out.jpg")
-        val outcomes = (1..SPEED_RUNS).map {
-            val t = System.currentTimeMillis()
-            val o = engine.convert(input, Format.JPG, out, Format.JPG, Preset())
-            tick()
-            (System.currentTimeMillis() - t) to o
+        suspend fun remote(media: Boolean): String {
+            var cpuset = "unknown"
+            val parts = (1..SPEED_RUNS).map {
+                val o = engine.convert(input, Format.JPG, out, Format.JPG, Preset(), inMediaProcess = media)
+                tick()
+                (o as? Outcome.Success)?.also { s -> cpuset = s.cpuset }?.let { s -> "${s.decodeMs}+${s.encodeMs}" } ?: "failed"
+            }
+            return "${parts.joinToString(" / ")} ms ($cpuset)"
         }
-        val service = outcomes.map { it.first }
-        val inside = outcomes.map { (it.second as? Outcome.Success)?.engineMs ?: -1 }
-        val cpuset = (outcomes.last().second as? Outcome.Success)?.cpuset ?: "unknown"
-        var decodeMs = 0L
-        var encodeMs = 0L
-        repeat(SPEED_RUNS) {
-            // Debug-only comparison on our own generated file; the app never decodes user files itself.
+        val isolated = remote(media = false)
+        val media = remote(media = true)
+        // Debug-only comparisons on our own generated file; the app never decodes user files itself.
+        val sameCode = (1..SPEED_RUNS).map {
+            val r = ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY).use { inFd ->
+                ParcelFileDescriptor.open(out, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE).use { outFd ->
+                    ImageConverter.convert(inFd, outFd, Format.JPG, 90, 0)
+                }
+            }
+            tick()
+            "${r.decodeMs}+${r.encodeMs}"
+        }
+        val plain = (1..SPEED_RUNS).map {
             val t0 = System.currentTimeMillis()
             val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(input)) { d, _, _ -> d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE }
             val t1 = System.currentTimeMillis()
             out.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-            encodeMs += System.currentTimeMillis() - t1
-            decodeMs += t1 - t0
             bitmap.recycle()
             tick()
+            "${t1 - t0}+${System.currentTimeMillis() - t1}"
         }
-        val inApp = (decodeMs + encodeMs) / SPEED_RUNS
         report(
             null,
-            "Speed, 12 MP JPG → JPG: converter process ${service.joinToString(" / ")} ms " +
-                "(inside the converter ${inside.joinToString(" / ")} ms, CPU group $cpuset); " +
-                "in the app $inApp ms (decode ${decodeMs / SPEED_RUNS}, encode ${encodeMs / SPEED_RUNS}, " +
-                "CPU group ${runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("unknown")})",
+            "Speed, 12 MP JPG → JPG, decode+encode ms:\n" +
+                "isolated process: $isolated\n" +
+                ":media process: $media\n" +
+                "converter code in the app: ${sameCode.joinToString(" / ")}\n" +
+                "plain in the app: ${plain.joinToString(" / ")}",
         )
     }
 

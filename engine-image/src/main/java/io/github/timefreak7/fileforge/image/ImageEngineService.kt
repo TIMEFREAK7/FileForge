@@ -25,11 +25,13 @@ abstract class ImageEngineService : Service() {
         ): Bundle = try {
             val start = SystemClock.elapsedRealtime()
             val target = Format.fromMime(targetMime) ?: throw ConversionException("Unknown output format.")
-            val (w, h) = ImageConverter.convert(input, output, target, quality, maxSide)
+            val result = ImageConverter.convert(input, output, target, quality, maxSide)
             Bundle().apply {
                 putBoolean("ok", true)
-                putInt("w", w)
-                putInt("h", h)
+                putInt("w", result.width)
+                putInt("h", result.height)
+                putLong("decodeMs", result.decodeMs)
+                putLong("encodeMs", result.encodeMs)
                 // Diagnostics for the self-test's speed check: time spent here, and the CPU group Android gave us.
                 putLong("ms", SystemClock.elapsedRealtime() - start)
                 putString("cpuset", runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("unknown"))
