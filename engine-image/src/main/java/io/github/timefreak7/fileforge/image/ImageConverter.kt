@@ -19,7 +19,7 @@ class ConversionException(message: String) : Exception(message)
 object ImageConverter {
 
     /** EXIF tags carried over when the user keeps metadata. Orientation is not: pixels are already upright. */
-    private val KEPT_TAGS = listOf(
+    val KEPT_TAGS = listOf(
         ExifInterface.TAG_DATETIME, ExifInterface.TAG_DATETIME_ORIGINAL, ExifInterface.TAG_DATETIME_DIGITIZED,
         ExifInterface.TAG_OFFSET_TIME, ExifInterface.TAG_OFFSET_TIME_ORIGINAL, ExifInterface.TAG_OFFSET_TIME_DIGITIZED,
         ExifInterface.TAG_MAKE, ExifInterface.TAG_MODEL, ExifInterface.TAG_LENS_MAKE, ExifInterface.TAG_LENS_MODEL,
@@ -40,7 +40,6 @@ object ImageConverter {
         target: Format,
         quality: Int,
         maxSide: Int,
-        keepMetadata: Boolean,
     ): Pair<Int, Int> {
         val bitmap = decode(input, maxSide)
         try {
@@ -50,8 +49,6 @@ object ImageConverter {
                 Format.WEBP -> compress(bitmap, Bitmap.CompressFormat.WEBP_LOSSY, quality, output)
                 Format.HEIC -> encodeHeic(bitmap, quality, output)
             }
-            // HEIC output: ExifInterface cannot write HEIF, so metadata is always dropped there.
-            if (keepMetadata && target != Format.HEIC) copyMetadata(input, output)
             return bitmap.width to bitmap.height
         } finally {
             bitmap.recycle()
@@ -122,15 +119,14 @@ object ImageConverter {
         }
     }
 
-    private fun copyMetadata(input: ParcelFileDescriptor, output: ParcelFileDescriptor) {
-        try {
-            val source = input.dup().use { ExifInterface(it.fileDescriptor) }
-            val target = ExifInterface(output.fileDescriptor)
-            for (tag in KEPT_TAGS) source.getAttribute(tag)?.let { target.setAttribute(tag, it) }
-            target.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
-            target.saveAttributes()
-        } catch (e: Exception) {
-            throw ConversionException("The image converted, but its metadata could not be copied.")
-        }
+    /**
+     * Reads the kept EXIF tags from the input. Writing them happens in the main process
+     * ([ImageEngineClient]): ExifInterface saves through a temp file, which an isolated process cannot create.
+     */
+    fun readMetadata(input: ParcelFileDescriptor): Map<String, String> = try {
+        val exif = input.dup().use { ExifInterface(it.fileDescriptor) }
+        KEPT_TAGS.mapNotNull { tag -> exif.getAttribute(tag)?.let { tag to it } }.toMap()
+    } catch (e: Exception) {
+        throw ConversionException("The image converted, but its photo details could not be read.")
     }
 }

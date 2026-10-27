@@ -11,6 +11,7 @@ import android.os.DeadObjectException
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import androidx.exifinterface.media.ExifInterface
 import io.github.timefreak7.fileforge.core.Format
 import io.github.timefreak7.fileforge.core.Limits
 import io.github.timefreak7.fileforge.core.Preset
@@ -77,11 +78,20 @@ class ImageEngineClient(private val context: Context) : Closeable {
             drop(service, kill = true)
             return Outcome.Failure("This file took too long to convert and was stopped.")
         }
-        return if (bundle.getBoolean("ok")) {
-            Outcome.Success(bundle.getInt("w"), bundle.getInt("h"))
-        } else {
-            Outcome.Failure(bundle.getString("error") ?: "Conversion failed.")
+        if (!bundle.getBoolean("ok")) return Outcome.Failure(bundle.getString("error") ?: "Conversion failed.")
+        bundle.getBundle("exif")?.let { tags ->
+            // Writes only into our own freshly encoded output; the untrusted input was parsed remotely.
+            try {
+                ExifInterface(output).apply {
+                    ImageConverter.KEPT_TAGS.forEach { tag -> tags.getString(tag)?.let { setAttribute(tag, it) } }
+                    setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
+                    saveAttributes()
+                }
+            } catch (e: Exception) {
+                return Outcome.Failure("The image converted, but its photo details could not be saved.")
+            }
         }
+        return Outcome.Success(bundle.getInt("w"), bundle.getInt("h"))
     }
 
     private suspend fun bind(service: Class<out ImageEngineService>): Connection? =

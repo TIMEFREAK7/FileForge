@@ -22,11 +22,15 @@ abstract class ImageEngineService : Service() {
             keepMetadata: Boolean,
         ): Bundle = try {
             val target = Format.fromMime(targetMime) ?: throw ConversionException("Unknown output format.")
-            val (w, h) = ImageConverter.convert(input, output, target, quality, maxSide, keepMetadata)
+            val (w, h) = ImageConverter.convert(input, output, target, quality, maxSide)
             Bundle().apply {
                 putBoolean("ok", true)
                 putInt("w", w)
                 putInt("h", h)
+                // HEIC output: ExifInterface cannot write HEIF, so metadata is always dropped there.
+                if (keepMetadata && target != Format.HEIC) {
+                    putBundle("exif", Bundle().apply { ImageConverter.readMetadata(input).forEach { (tag, value) -> putString(tag, value) } })
+                }
             }
         } catch (e: ConversionException) {
             failure(e.message ?: "Conversion failed.")
