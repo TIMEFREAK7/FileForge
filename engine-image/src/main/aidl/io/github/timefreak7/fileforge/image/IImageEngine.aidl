@@ -13,4 +13,13 @@ interface IImageEngine {
      */
     Bundle convert(in ParcelFileDescriptor input, in ParcelFileDescriptor output,
             String targetMime, int quality, int maxSide, boolean keepMetadata);
+
+    /**
+     * Decodes only (the untrusted parsing step). Returns "ok" and the pixels ("mem" SharedMemory,
+     * "w", "h", "alpha", "cs"), plus "exif" when asked, or "error".
+     */
+    Bundle decode(in ParcelFileDescriptor input, int maxSide, boolean keepMetadata);
+
+    /** Encodes pixels from [decode] into [output]. Returns "ok", or "error". */
+    Bundle encode(in Bundle pixels, in ParcelFileDescriptor output, String targetMime, int quality);
 }

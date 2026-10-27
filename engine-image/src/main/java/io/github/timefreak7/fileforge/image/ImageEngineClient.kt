@@ -11,6 +11,7 @@ import android.os.DeadObjectException
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import android.os.SharedMemory
 import androidx.exifinterface.media.ExifInterface
 import io.github.timefreak7.fileforge.core.Format
 import io.github.timefreak7.fileforge.core.Limits
@@ -44,8 +45,14 @@ class ImageEngineClient(private val context: Context) : Closeable {
 
     private val connections = ConcurrentHashMap<Class<out ImageEngineService>, Connection>()
 
-    /** Converts [input] (detected as [inputFormat]) into [output]. Never throws for a bad file. */
-    /** [inMediaProcess] forces the ":media" process; the self-test uses it to compare the two processes. */
+    /** A plain-language failure that ends one conversion. */
+    private class Stop(val failure: Outcome.Failure) : Exception()
+
+    /**
+     * Converts [input] (detected as [inputFormat]) into [output]. Never throws for a bad file.
+     * JPG/PNG/WebP are parsed in the isolated process and encoded in ":media"; HEIC input goes wholly
+     * to ":media". [inMediaProcess] forces the whole conversion into ":media" (self-test speed check).
+     */
     suspend fun convert(
         input: File,
         inputFormat: Format,
@@ -54,67 +61,100 @@ class ImageEngineClient(private val context: Context) : Closeable {
         preset: Preset,
         inMediaProcess: Boolean = false,
     ): Outcome {
-        val service = if (inMediaProcess || inputFormat == Format.HEIC || target == Format.HEIC) {
-            MediaImageService::class.java
-        } else {
-            IsolatedImageService::class.java
+        val timeout = Limits.imageTimeoutMs(input.length())
+        val media = MediaImageService::class.java
+        return try {
+            val (result, exif) = if (inMediaProcess || inputFormat == Format.HEIC) {
+                val r = call(media, timeout, readOnly(input), writable(output)) { e, (i, o) ->
+                    e.convert(i, o, target.mime, preset.quality, preset.maxSide, preset.keepMetadata)
+                }
+                r to r.getBundle("exif")
+            } else {
+                val pixels = call(IsolatedImageService::class.java, timeout, readOnly(input)) { e, (i) ->
+                    e.decode(i, preset.maxSide, preset.keepMetadata && target != Format.HEIC)
+                }
+                try {
+                    val encoded = call(media, timeout, writable(output)) { e, (o) ->
+                        e.encode(pixels, o, target.mime, preset.quality)
+                    }
+                    Bundle(pixels).apply { putAll(encoded) } to pixels.getBundle("exif")
+                } finally {
+                    pixels.getParcelable("mem", SharedMemory::class.java)?.close()
+                }
+            }
+            exif?.let { writeExif(output, it) }
+            Outcome.Success(
+                result.getInt("w"),
+                result.getInt("h"),
+                result.getLong("ms"),
+                result.getLong("decodeMs"),
+                result.getLong("encodeMs"),
+                result.getString("cpuset").orEmpty(),
+            )
+        } catch (e: Stop) {
+            e.failure
         }
-        val connection = connections[service] ?: bind(service)?.also { connections[service] = it }
-            ?: return Outcome.Failure("The converter could not start.")
+    }
 
+    private fun readOnly(f: File) = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+
+    private fun writable(f: File) = ParcelFileDescriptor.open(
+        f,
+        ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE,
+    )
+
+    /** One call into a parser process, with the S5 timeout. Returns its "ok" bundle or throws [Stop]. */
+    private suspend fun call(
+        service: Class<out ImageEngineService>,
+        timeoutMs: Long,
+        vararg fds: ParcelFileDescriptor,
+        block: (IImageEngine, Array<out ParcelFileDescriptor>) -> Bundle,
+    ): Bundle {
+        val connection = connections[service] ?: bind(service)?.also { connections[service] = it }
+            ?: run {
+                fds.forEach { it.close() }
+                throw Stop(Outcome.Failure("The converter could not start."))
+            }
         val result = CompletableDeferred<Bundle>()
-        val inFd = ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY)
-        val outFd = ParcelFileDescriptor.open(
-            output,
-            ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE,
-        )
         // A binder call cannot be interrupted, so it runs on its own thread and is abandoned on timeout.
         thread(name = "image-engine") {
             try {
-                result.complete(
-                    connection.engine.convert(inFd, outFd, target.mime, preset.quality, preset.maxSide, preset.keepMetadata),
-                )
+                result.complete(block(connection.engine, fds))
             } catch (t: Throwable) {
                 result.completeExceptionally(t)
             } finally {
-                inFd.close()
-                outFd.close()
+                fds.forEach { it.close() }
             }
         }
         val bundle = try {
-            withTimeoutOrNull(Limits.imageTimeoutMs(input.length())) { result.await() }
+            withTimeoutOrNull(timeoutMs) { result.await() }
         } catch (e: DeadObjectException) {
             drop(service)
-            return Outcome.Failure("This file crashed the converter, so it was skipped.")
+            throw Stop(Outcome.Failure("This file crashed the converter, so it was skipped."))
         } catch (e: Exception) {
             drop(service)
-            return Outcome.Failure("The converter stopped unexpectedly (${e.javaClass.simpleName}).")
+            throw Stop(Outcome.Failure("The converter stopped unexpectedly (${e.javaClass.simpleName})."))
         }
         if (bundle == null) {
             drop(service, kill = true)
-            return Outcome.Failure("This file took too long to convert and was stopped.")
+            throw Stop(Outcome.Failure("This file took too long to convert and was stopped."))
         }
-        if (!bundle.getBoolean("ok")) return Outcome.Failure(bundle.getString("error") ?: "Conversion failed.")
-        bundle.getBundle("exif")?.let { tags ->
-            // Writes only into our own freshly encoded output; the untrusted input was parsed remotely.
-            try {
-                ExifInterface(output).apply {
-                    ImageConverter.KEPT_TAGS.forEach { tag -> tags.getString(tag)?.let { setAttribute(tag, it) } }
-                    setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
-                    saveAttributes()
-                }
-            } catch (e: Exception) {
-                return Outcome.Failure("The image converted, but its photo details could not be saved.")
+        bundle.classLoader = SharedMemory::class.java.classLoader
+        if (!bundle.getBoolean("ok")) throw Stop(Outcome.Failure(bundle.getString("error") ?: "Conversion failed."))
+        return bundle
+    }
+
+    /** Writes only into our own freshly encoded output; the untrusted input was parsed remotely. */
+    private fun writeExif(output: File, tags: Bundle) {
+        try {
+            ExifInterface(output).apply {
+                ImageConverter.KEPT_TAGS.forEach { tag -> tags.getString(tag)?.let { setAttribute(tag, it) } }
+                setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL.toString())
+                saveAttributes()
             }
+        } catch (e: Exception) {
+            throw Stop(Outcome.Failure("The image converted, but its photo details could not be saved."))
         }
-        return Outcome.Success(
-            bundle.getInt("w"),
-            bundle.getInt("h"),
-            bundle.getLong("ms"),
-            bundle.getLong("decodeMs"),
-            bundle.getLong("encodeMs"),
-            bundle.getString("cpuset").orEmpty(),
-        )
     }
 
     private suspend fun bind(service: Class<out ImageEngineService>): Connection? =

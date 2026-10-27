@@ -8,7 +8,7 @@ Scope from [spec.md](spec.md#build-phases-and-testing-gates): the donut, share e
 | --- | --- |
 | Converter contract: formats, presets, targets, safe file names, format sniffing, limits | `core` (plain Kotlin, unit-tested) |
 | Image engine: decode, resize, encode to JPG / PNG / WebP / HEIC, location stripped unless kept, transparent → white for JPG | `engine-image/ImageConverter` |
-| Parser processes: JPG/PNG/WebP in the isolated process, anything HEIC in `:media`, per-file timeout, crash recovery | `engine-image/ImageEngineService`, `ImageEngineClient` |
+| Parser processes: JPG/PNG/WebP decoded in the isolated process and encoded in `:media` (the encoder stalls ~5 s in an isolated process), HEIC wholly in `:media`, per-file timeout, crash recovery | `engine-image/ImageEngineService`, `ImageEngineClient` |
 | Jobs: inputs copied in on queueing, WorkManager worker, progress notification, cancel, retry of failed files, cleanup at start | `jobs` |
 | UI: first-run folder choice, Home with Pick files and Recents, donut (drag and tap modes), options sheet, Jobs, Settings, share and Open-with entry | `app/ui` |
 | Accessibility: TalkBack or Switch Access swaps the donut for a plain list; 48 dp targets; system font size | `Donut.kt`, `Sheets.kt` |

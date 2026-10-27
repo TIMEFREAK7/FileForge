@@ -201,8 +201,8 @@ class SelfTest(
         report(
             null,
             "Speed, 12 MP JPG → JPG, decode+encode ms:\n" +
-                "isolated process: $isolated\n" +
-                ":media process: $media\n" +
+                "normal path (decode isolated, encode :media): $isolated\n" +
+                "all in :media: $media\n" +
                 "converter code in the app: ${sameCode.joinToString(" / ")}\n" +
                 "plain in the app: ${plain.joinToString(" / ")}",
         )

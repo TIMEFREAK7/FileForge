@@ -5,7 +5,11 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ImageDecoder
+import android.graphics.ColorSpace
+import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import android.os.SharedMemory
+import android.system.OsConstants
 import android.os.SystemClock
 import androidx.exifinterface.media.ExifInterface
 import androidx.heifwriter.HeifWriter
@@ -49,19 +53,61 @@ object ImageConverter {
         val bitmap = decode(input, maxSide)
         val t1 = SystemClock.elapsedRealtime()
         try {
-            when (target) {
-                Format.JPG -> compress(withWhiteBackground(bitmap), Bitmap.CompressFormat.JPEG, quality, output)
-                Format.PNG -> compress(bitmap, Bitmap.CompressFormat.PNG, 100, output)
-                Format.WEBP -> compress(bitmap, Bitmap.CompressFormat.WEBP_LOSSY, quality, output)
-                Format.HEIC -> encodeHeic(bitmap, quality, output)
-            }
+            encode(bitmap, target, quality, output)
             return Result(bitmap.width, bitmap.height, t1 - t0, SystemClock.elapsedRealtime() - t1)
         } finally {
             bitmap.recycle()
         }
     }
 
-    private fun decode(input: ParcelFileDescriptor, maxSide: Int): Bitmap {
+    /** Encodes pixels FileForge already decoded; never parses untrusted bytes. */
+    fun encode(bitmap: Bitmap, target: Format, quality: Int, output: ParcelFileDescriptor) {
+        when (target) {
+            Format.JPG -> compress(withWhiteBackground(bitmap), Bitmap.CompressFormat.JPEG, quality, output)
+            Format.PNG -> compress(bitmap, Bitmap.CompressFormat.PNG, 100, output)
+            Format.WEBP -> compress(bitmap, Bitmap.CompressFormat.WEBP_LOSSY, quality, output)
+            Format.HEIC -> encodeHeic(bitmap, quality, output)
+        }
+    }
+
+    /** Pixels for another process: a binder transaction is capped near 1 MB, so they travel in shared memory. */
+    fun toPixels(decoded: Bitmap): Bundle {
+        // HDR and 10-bit photos decode to wider pixel formats; the receiver rebuilds ARGB_8888.
+        val bitmap = if (decoded.config == Bitmap.Config.ARGB_8888) decoded else decoded.copy(Bitmap.Config.ARGB_8888, false)
+        val mem = SharedMemory.create("pixels", bitmap.byteCount)
+        val buffer = mem.mapReadWrite()
+        bitmap.copyPixelsToBuffer(buffer)
+        SharedMemory.unmap(buffer)
+        mem.setProtect(OsConstants.PROT_READ)
+        val pixels = Bundle().apply {
+            putParcelable("mem", mem)
+            putInt("w", bitmap.width)
+            putInt("h", bitmap.height)
+            putBoolean("alpha", bitmap.hasAlpha())
+            putString("cs", (namedColorSpace(bitmap.colorSpace) ?: ColorSpace.Named.SRGB).name)
+        }
+        if (bitmap !== decoded) bitmap.recycle()
+        return pixels
+    }
+
+    fun fromPixels(pixels: Bundle): Bitmap {
+        val w = pixels.getInt("w")
+        val h = pixels.getInt("h")
+        val colorSpace = ColorSpace.get(ColorSpace.Named.valueOf(pixels.getString("cs")!!))
+        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888, pixels.getBoolean("alpha"), colorSpace)
+        pixels.getParcelable("mem", SharedMemory::class.java)!!.use { mem ->
+            require(mem.size >= bitmap.byteCount) { "pixel buffer too small" }
+            val buffer = mem.mapReadOnly()
+            bitmap.copyPixelsFromBuffer(buffer)
+            SharedMemory.unmap(buffer)
+        }
+        return bitmap
+    }
+
+    private fun namedColorSpace(cs: ColorSpace?): ColorSpace.Named? =
+        ColorSpace.Named.entries.firstOrNull { ColorSpace.get(it) == (cs ?: ColorSpace.get(ColorSpace.Named.SRGB)) }
+
+    fun decode(input: ParcelFileDescriptor, maxSide: Int): Bitmap {
         val source = ImageDecoder.createSource {
             AssetFileDescriptor(input.dup(), 0, AssetFileDescriptor.UNKNOWN_LENGTH)
         }
@@ -75,6 +121,8 @@ object ImageConverter {
                     )
                 }
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                // Pixels may cross to another process, which needs a colour space it can name; ICC-only ones become sRGB.
+                if (namedColorSpace(info.colorSpace) == null) decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
                 decoder.setOnPartialImageListener { false }
                 val longest = maxOf(w, h)
                 if (maxSide in 1 until longest) {
