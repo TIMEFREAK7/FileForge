@@ -48,7 +48,10 @@ Send screenshots of steps 2 and 7, and note anything that looked wrong in the ot
 | S7, S8 | Passed |
 | Real photos converted from the app | Camera photo → HEIC and screenshot → JPG appear in Recents |
 | Speed, 12 MP JPG → JPG | ~210 ms (decode 80 ms isolated + encode 130 ms in `:media`); was 5.1 s with encoding in the isolated process |
-| Swiped-away job, motion bars, airplane mode, TalkBack | Not yet checked |
+| Share from another app | Google Photos → FileForge (also in its floating window) → donut → 5 files to WebP |
+| Swiped-away job | Passed: job finished after FileForge was swiped away |
+| Motion bars | Pending: debug builds are unoptimised, so this is measured on the `profile` build |
+| Airplane mode, TalkBack | Not yet checked |
 
 ## Not done yet (honest gaps)
 
@@ -57,4 +60,4 @@ Send screenshots of steps 2 and 7, and note anything that looked wrong in the ot
 - **S4's instrumented test** (fail if a parser class loads in the main process) is not written; S4 is enforced by structure (all decoding goes through `ImageEngineClient`) and code review.
 - **A hung isolated process** cannot be killed by the app (different user id); after a timeout it is unbound and left for Android to reclaim. Hung files are counted in the fuzz pass.
 - **HEIC output keeps no metadata**: Android's ExifInterface cannot write HEIF.
-- The release build (R8-shrunk) has not been run on a phone; the debug APK is what you test.
+- The release build (R8-shrunk) runs on the phone only as the `profile` build type (same code, debug-signed); the self-tests are hidden there.
