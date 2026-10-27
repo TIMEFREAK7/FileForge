@@ -15,11 +15,11 @@ object FileNames {
         return cleaned.ifEmpty { "converted" }
     }
 
-    /** Output display name for [input] converted to [format], or the user's [chosen] base name. */
-    fun outputName(input: String?, format: Format, chosen: String? = null): String {
+    /** Output display name for [input] converted to [format], or the user's [chosen] base name, plus [suffix] (e.g. "_p001"). */
+    fun outputName(input: String?, format: Format, chosen: String? = null, suffix: String = ""): String {
         val base = chosen?.takeIf { it.isNotBlank() }
             ?: input?.let { if ('.' in it) it.substringBeforeLast('.') else it }
             ?: "converted"
-        return "${sanitize(base)}.${format.extension}"
+        return "${sanitize(base.take(MAX_LENGTH - suffix.length) + suffix)}.${format.extension}"
     }
 }

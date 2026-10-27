@@ -87,6 +87,7 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
     var donut by remember { mutableStateOf<DonutState?>(null) }
     var options by remember { mutableStateOf<OptionsState?>(null) }
     var selfTest by remember { mutableStateOf(false) }
+    var pdfPages by remember { mutableStateOf<List<IncomingFile>?>(null) }
     val jobs by remember { JobQueue.observe(context) }.collectAsStateWithLifecycle(emptyList())
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -111,6 +112,9 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
             openDonut(withContext(Dispatchers.IO) { uris.map { JobQueue.describe(context, it) } })
         }
     }
+    val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) scope.launch { pdfPages = withContext(Dispatchers.IO) { uris.map { JobQueue.describe(context, it) } } }
+    }
 
     // Shared or opened-with files go straight to the donut once an output folder exists.
     LaunchedEffect(incoming, outputTree) {
@@ -118,6 +122,11 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
             openDonut(incoming)
             onIncomingHandled()
         }
+    }
+
+    suspend fun showQueued(what: String) {
+        val result = snackbar.showSnackbar(what, actionLabel = "View")
+        if (result == SnackbarResult.ActionPerformed) tab = Tab.Jobs
     }
 
     fun convert(files: List<IncomingFile>, target: Format, preset: Preset) {
@@ -129,13 +138,16 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
         scope.launch {
             JobQueue.enqueue(context, files, target, preset)
             val what = if (files.size == 1) "1 file" else "${files.size} files"
-            val result = snackbar.showSnackbar("Converting $what to ${target.label}", actionLabel = "View")
-            if (result == SnackbarResult.ActionPerformed) tab = Tab.Jobs
+            showQueued("${actionText(target, Targets.action(files.map { it.format }, target))}: $what")
         }
     }
 
     if (outputTree == null) {
         OutputFolderScreen(onChoose = { folderPicker.launch(DocumentsFolder) })
+        return
+    }
+    pdfPages?.let { start ->
+        PdfPagesScreen(start, onQueued = { scope.launch { showQueued(it) } }, onClose = { pdfPages = null })
         return
     }
     if (selfTest) {
@@ -177,7 +189,8 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                 Tab.Home -> HomeScreen(
                     recents = recentOutputs(jobs),
                     contentPadding = padding,
-                    onPickFiles = { filePicker.launch(arrayOf("image/*")) },
+                    onPickFiles = { filePicker.launch(arrayOf("image/*", "application/pdf")) },
+                    onEditPdf = { pdfPicker.launch(arrayOf("application/pdf")) },
                     drag = DonutDrag(
                         onStart = { file, p ->
                             donut = if (useList) DonutState(listOf(file), null, null) else DonutState(listOf(file), p, p)
@@ -211,11 +224,14 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
         }
 
         donut?.let { d ->
-            val enabled = Targets.forInputs(d.files.map { it.format }, order, ImageEngineClient.heicEncodeAvailable).toSet()
+            val formats = d.files.map { it.format }
+            val enabled = Targets.forInputs(formats, order, ImageEngineClient.heicEncodeAvailable).toSet()
+            val label = { f: Format -> Targets.action(formats, f) }
             if (useList) {
                 TargetListDialog(
                     targets = order.filter { it in enabled },
                     fileCount = d.files.size,
+                    label = label,
                     onConvert = { convert(d.files, it, settings.defaultPreset(it)) },
                     onOptions = { options = OptionsState(d.files, it); donut = null },
                     onDismiss = { donut = null },
@@ -230,13 +246,14 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                     onConvert = { convert(d.files, it, settings.defaultPreset(it)) },
                     onOptions = { options = OptionsState(d.files, it); donut = null },
                     onDismiss = { donut = null },
+                    label = label,
                 )
             }
         }
         options?.let { o ->
             OptionsSheet(
                 target = o.target,
-                fileCount = o.files.size,
+                inputs = o.files.map { it.format },
                 defaults = settings.defaultPreset(o.target),
                 onConvert = { preset -> convert(o.files, o.target, preset) },
                 onDismiss = { options = null },

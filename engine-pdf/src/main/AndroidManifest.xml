@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- S4: every PDF is parsed here, with no storage or network rights. -->
+        <service
+            android:name=".IsolatedPdfService"
+            android:exported="false"
+            android:isolatedProcess="true" />
+        <!-- Builds PDFs from JPEGs FileForge itself just encoded; never parses user files. -->
+        <service
+            android:name=".MediaPdfService"
+            android:exported="false"
+            android:process=":media" />
+    </application>
+</manifest>

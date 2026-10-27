@@ -92,7 +92,8 @@ fun SelfTestScreen(onClose: () -> Unit) {
     }
 
     val failed = lines.filter { it.ok == false }
-    val key = lines.filter { it.ok != false && (it.text.startsWith("100 mixed") || it.text.startsWith("Speed") || it.text.startsWith("Fuzz") || it.text.startsWith("S7") || it.text.startsWith("S8")) }
+    val keyPrefixes = listOf("100 mixed", "Speed", "Fuzz", "S7", "S8", "Merge 300", "Split 300", "Scanned PDF", "JPEG encode")
+    val key = lines.filter { line -> line.ok != false && keyPrefixes.any { line.text.startsWith(it) } }
     val elapsed = (now - startedAt).coerceAtLeast(0) / 1000
 
     Surface(Modifier.fillMaxSize()) {

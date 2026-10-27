@@ -67,6 +67,7 @@ object ImageConverter {
             Format.PNG -> compress(bitmap, Bitmap.CompressFormat.PNG, 100, output)
             Format.WEBP -> compress(bitmap, Bitmap.CompressFormat.WEBP_LOSSY, quality, output)
             Format.HEIC -> encodeHeic(bitmap, quality, output)
+            Format.PDF -> throw ConversionException("PDF output is made by the PDF engine.")
         }
     }
 

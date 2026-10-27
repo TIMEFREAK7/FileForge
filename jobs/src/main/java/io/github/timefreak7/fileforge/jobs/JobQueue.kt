@@ -9,11 +9,11 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
-import io.github.timefreak7.fileforge.core.FileNames
 import io.github.timefreak7.fileforge.core.Format
 import io.github.timefreak7.fileforge.core.Limits
 import io.github.timefreak7.fileforge.core.Preset
 import io.github.timefreak7.fileforge.core.Sniffer
+import io.github.timefreak7.fileforge.pdf.PageRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,22 +54,53 @@ object JobQueue {
      * runs), then queues the job. Inputs over the size limit are recorded as failed, not copied.
      */
     suspend fun enqueue(context: Context, files: List<IncomingFile>, target: Format, preset: Preset): String =
-        withContext(Dispatchers.IO) {
-            require(files.size <= Limits.MAX_FILES_PER_JOB) { "too many files" }
-            val store = JobStore(context)
-            val id = UUID.randomUUID().toString()
-            store.inputDir(id).mkdirs()
-            val inputs = files.mapIndexed { i, f -> copyIn(context, f, store.inputFile(id, i)) }
-            store.save(JobRecord(id, System.currentTimeMillis(), target, preset, inputs))
-            start(context, id)
-            id
+        add(context, files, target, preset, opFor(files.map { it.format }, target))
+
+    /** The organiser's result: [pages] into one PDF, or one PDF per group of [splits]. Inputs are PDFs. */
+    suspend fun enqueuePages(
+        context: Context,
+        files: List<IncomingFile>,
+        preset: Preset,
+        pages: List<PageRef> = emptyList(),
+        splits: List<List<PageRef>> = emptyList(),
+    ): String = add(context, files, Format.PDF, preset, if (splits.isEmpty()) JobOp.ASSEMBLE_PDF else JobOp.SPLIT_PDF, pages, splits)
+
+    private suspend fun add(
+        context: Context,
+        files: List<IncomingFile>,
+        target: Format,
+        preset: Preset,
+        op: JobOp,
+        pages: List<PageRef> = emptyList(),
+        splits: List<List<PageRef>> = emptyList(),
+    ): String = withContext(Dispatchers.IO) {
+        require(files.size <= Limits.MAX_FILES_PER_JOB) { "too many files" }
+        val store = JobStore(context)
+        val id = UUID.randomUUID().toString()
+        store.inputDir(id).mkdirs()
+        val pdf = op != JobOp.CONVERT && (op != JobOp.COMBINE_PDF || files.all { it.format == Format.PDF })
+        val inputs = files.mapIndexed { i, f -> copyIn(context, f, store.inputFile(id, i), pdf) }
+        store.save(JobRecord(id, System.currentTimeMillis(), target, preset, inputs, op, pages = pages, splits = splits))
+        start(context, id)
+        id
+    }
+
+    /** Images: convert, or one PDF of all of them. PDFs: pages to images, compress one, or merge several. */
+    internal fun opFor(formats: List<Format?>, target: Format): JobOp {
+        val pdfs = formats.any { it == Format.PDF }
+        return when {
+            !pdfs -> if (target == Format.PDF) JobOp.COMBINE_PDF else JobOp.CONVERT
+            target != Format.PDF -> JobOp.PDF_TO_IMAGES
+            formats.size == 1 -> JobOp.COMPRESS_PDF
+            else -> JobOp.COMBINE_PDF
         }
+    }
 
     /** Re-runs the inputs of [id] that failed. Inputs already converted are skipped. */
     fun retry(context: Context, id: String) {
         val store = JobStore(context)
         val job = store.load(id) ?: return
-        store.save(job.copy(inputs = job.inputs.map { if (it.done) it else it.copy(error = null) }))
+        store.save(job.copy(inputs = job.inputs.map { if (it.done) it else it.copy(error = null, note = null) }))
         start(context, id)
         recordsChanged.update { it + 1 }
     }
@@ -96,13 +127,13 @@ object JobQueue {
                 .mapValues { (_, list) -> list.firstOrNull { !it.state.isFinished } ?: list.last() }
             store.all().map { record ->
                 val info = byId[record.id]
-                val progress = info?.progress
+                // While running, the worker reports in its own units (pages for PDF jobs).
+                val progress = info?.progress?.takeIf { info.state == WorkInfo.State.RUNNING && it.getInt(ConvertWorker.TOTAL, 0) > 0 }
                 JobView(
                     record,
                     info?.state,
-                    progress?.getInt(ConvertWorker.DONE, 0)?.takeIf { info.state == WorkInfo.State.RUNNING }
-                        ?: record.inputs.count { it.done || it.error != null },
-                    record.inputs.size,
+                    progress?.getInt(ConvertWorker.DONE, 0) ?: record.inputs.count { it.done || it.error != null },
+                    progress?.getInt(ConvertWorker.TOTAL, 0) ?: record.inputs.size,
                 )
             }
         }.flowOn(Dispatchers.IO) // reads job files; keep it off the UI thread
@@ -129,8 +160,10 @@ object JobQueue {
         WorkManager.getInstance(context).enqueueUniqueWork(id, ExistingWorkPolicy.REPLACE, request)
     }
 
-    private fun copyIn(context: Context, file: IncomingFile, dest: File): JobInput {
+    /** [pdf]: whether this job expects PDFs; anything else is recorded as failed. */
+    private fun copyIn(context: Context, file: IncomingFile, dest: File, pdf: Boolean): JobInput {
         val name = file.name.take(200)
+        val limit = if (pdf) Limits.MAX_PDF_BYTES else Limits.MAX_IMAGE_BYTES
         return try {
             val tooBig = context.contentResolver.openInputStream(file.uri)!!.use { input ->
                 dest.outputStream().use { out ->
@@ -140,7 +173,7 @@ object JobQueue {
                         val n = input.read(buffer)
                         if (n < 0) break
                         total += n
-                        if (total > Limits.MAX_IMAGE_BYTES) return@use true
+                        if (total > limit) return@use true
                         out.write(buffer, 0, n)
                     }
                     false
@@ -148,13 +181,18 @@ object JobQueue {
             }
             if (tooBig) {
                 dest.delete()
-                return JobInput(name, null, error = "This file is larger than ${Limits.MAX_IMAGE_BYTES / (1024 * 1024)} MB.")
+                return JobInput(name, null, error = "This file is larger than ${limit / (1024 * 1024)} MB.")
             }
             val header = dest.inputStream().use { it.readNBytes(Sniffer.HEADER_BYTES) }
             val format = Sniffer.sniff(header)
-            if (format == null) {
+            if (format == null || (format == Format.PDF) != pdf) {
                 dest.delete()
-                JobInput(name, null, error = if (header.isEmpty()) "This file is empty." else "This is not a JPG, PNG, WebP or HEIC image.")
+                val error = when {
+                    header.isEmpty() -> "This file is empty."
+                    pdf -> "This is not a PDF."
+                    else -> "This is not a JPG, PNG, WebP or HEIC image."
+                }
+                JobInput(name, null, error = error)
             } else {
                 JobInput(name, format)
             }
@@ -163,8 +201,4 @@ object JobQueue {
             JobInput(name, null, error = "This file could not be read. If it was shared from another app, share it again.")
         }
     }
-
-    /** Output name for one input of [job]: the chosen name applies only to single-file jobs. */
-    internal fun outputName(job: JobRecord, input: JobInput) =
-        FileNames.outputName(input.name, job.target, job.preset.outputName.takeIf { job.inputs.size == 1 })
 }

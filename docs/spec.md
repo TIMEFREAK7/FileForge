@@ -99,12 +99,12 @@ Nine screens, one activity, built in Jetpack Compose.
 
 | Screen | What it does |
 | --- | --- |
-| Home | Recents, a Pick files button, and a grid of PDF tools |
+| Home | Recents, a Pick files button (images and PDFs, which open the donut: merge, compress and PDF → images are donut segments), and an Edit PDF pages button for the organiser |
 | Folders | Browse folders the user granted (via the system folder picker); long-press opens the donut |
 | Donut overlay | The radial menu described above |
 | Options sheet | Per-format preset: quality, size, DPI, page range, file name, remove password |
 | Jobs | Queue with progress, cancel, retry, and the error in plain words when one fails |
-| PDF organiser | Page thumbnails to merge, split, reorder, rotate, delete |
+| PDF organiser | Page thumbnails to merge (Add PDF), split before selected pages, extract, reorder, rotate, delete |
 | PDF editor | Viewer with pen, highlight, text box, shapes, signature, form fill, redact |
 | Signatures | Draw, save and delete signatures; stored only inside the app |
 | Settings | Output folder, default presets, donut segment order, keep-or-strip metadata, open-source licences |
@@ -195,7 +195,7 @@ No phase starts until the one before it passes its gate. Performance figures are
 | 0. Spikes | S1 manifest check in CI; isolated process round-trip including a PdfRenderer page returned through SharedMemory; MediaCodec hardware encode attempted from an isolated process; LAME NDK build; PDFBox text with Devanagari; check whether Android's own PDF APIs can replace parts of PDFBox on Android 16 | CI fails a test APK that has the INTERNET permission; the process split for each engine is decided and S4 updated if the MediaCodec result differs from the plan |
 | 0b. v2 spike (parallel, does not gate v1) | Chaquopy + PyMuPDF + pdf2docx install on Android | pdf2docx converts 10 sample PDFs on the phone, or v2 PDF → Word is re-planned |
 | 1. Core + images | Donut, share entry, jobs queue, Settings, all image conversions | 100 mixed photos convert with no crash; HEIC → JPG keeps orientation; location metadata absent unless kept on purpose; a shared file still converts after the app is swiped away before the job starts; donut and sheet motion runs without dropped frames on the OnePlus 13, checked with Developer options → Profile HWUI rendering → On screen as bars (bars stay well under the green line, so slower family phones keep headroom); and with "Remove animations" on every transition jumps to its end state |
-| 2. PDF tools | Merge, split, compress, page tools, PDF ↔ images | 300-page PDF merges and splits without running out of memory; compressed scanned PDF at least 40% smaller and still readable; merging a protected PDF gives a protected output |
+| 2. PDF tools | Merge, split, compress, page tools, PDF ↔ images, password-protected inputs | 300-page PDF merges and splits without running out of memory; compressed scanned PDF at least 40% smaller and still readable; merging a protected PDF gives a protected output |
 | 3. PDF editor | Annotate, sign, forms, redact | Annotations and signatures show in a second PDF reader; a Devanagari text box and form value render correctly there; an XFA form shows a clean error; S13 redaction test passes |
 | 4. Media | Video and audio conversions | 10-minute 1080p video → 720p MP4 finishes within its timeout, plays, and keeps audio in sync; cancel mid-job leaves no partial file; MP3 and M4A outputs both play in a second player |
 | 5. PDF → Word (v2) | engine-python | Text and simple tables survive on 20 test PDFs, checked by hand; layout loss is labelled in the app; S6 zip-bomb tests pass |

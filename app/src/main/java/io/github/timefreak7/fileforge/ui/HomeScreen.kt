@@ -16,6 +16,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -43,9 +44,7 @@ data class RecentOutput(val uri: Uri, val name: String, val format: Format, val 
 
 fun recentOutputs(jobs: List<JobView>): List<RecentOutput> = jobs
     .flatMap { job ->
-        job.record.inputs.mapNotNull { input ->
-            input.outputUri?.let { RecentOutput(Uri.parse(it), input.outputName ?: input.name, job.record.target, job.record.createdAt) }
-        }
+        job.record.outputs.map { RecentOutput(Uri.parse(it.uri), it.name, it.format, job.record.createdAt) }
     }
     .take(50)
 
@@ -62,6 +61,7 @@ fun HomeScreen(
     recents: List<RecentOutput>,
     contentPadding: PaddingValues,
     onPickFiles: () -> Unit,
+    onEditPdf: () -> Unit,
     drag: DonutDrag,
 ) {
     val context = LocalContext.current
@@ -87,13 +87,18 @@ fun HomeScreen(
             }
         }
         item {
+            OutlinedButton(onClick = onEditPdf, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                Text("Edit PDF pages", style = MaterialTheme.typography.titleMedium)
+            }
+        }
+        item {
             Text("Recent", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
         }
         if (recents.isEmpty()) {
             item {
                 Text(
                     "Converted files show up here. Long-press one to convert it again. " +
-                        "You can also share photos to FileForge from any app.",
+                        "You can also share photos and PDFs to FileForge from any app.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

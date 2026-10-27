@@ -27,6 +27,7 @@ class FileNamesTest {
         assertEquals("my photo.png", FileNames.outputName("x.jpg", Format.PNG, chosen = "my photo"))
         assertEquals("__etc_passwd.png", FileNames.outputName("../etc/passwd.jpg", Format.PNG))
         assertEquals("converted.jpg", FileNames.outputName(null, Format.JPG))
+        assertEquals("a.b_p001.jpg", FileNames.outputName("a.b.pdf", Format.JPG, suffix = "_p001"))
     }
 }
 
@@ -40,12 +41,13 @@ class SnifferTest {
         assertEquals(Format.WEBP, Sniffer.sniff(ascii("RIFF\u0000\u0000\u0000\u0000WEBPVP8 ")))
         assertEquals(Format.HEIC, Sniffer.sniff(ascii("\u0000\u0000\u0000\u0018ftypheic")))
         assertEquals(Format.HEIC, Sniffer.sniff(ascii("\u0000\u0000\u0000\u0018ftypmif1")))
+        assertEquals(Format.PDF, Sniffer.sniff(ascii("%PDF-1.7\n%âãÏÓ")))
     }
 
     @Test fun rejectsUnknownAndShortInput() {
         assertNull(Sniffer.sniff(ByteArray(0)))
         assertNull(Sniffer.sniff(byteArrayOf(0xFF.toByte())))
-        assertNull(Sniffer.sniff(ascii("%PDF-1.7")))
+        assertNull(Sniffer.sniff(ascii("%PDX-1.7")))
         assertNull(Sniffer.sniff(ascii("\u0000\u0000\u0000\u0018ftypisom")))
     }
 }
@@ -54,8 +56,21 @@ class TargetsTest {
     private val order = Format.DEFAULT_ORDER
 
     @Test fun heicNeedsHardwareEncoder() {
-        assertEquals(listOf(Format.JPG, Format.PNG, Format.WEBP), Targets.forInputs(listOf(Format.JPG), order, false))
+        assertEquals(listOf(Format.JPG, Format.PNG, Format.WEBP, Format.PDF), Targets.forInputs(listOf(Format.JPG), order, false))
         assertEquals(order, Targets.forInputs(listOf(Format.HEIC, Format.PNG), order, true))
+    }
+
+    @Test fun pdfInputsBecomePagesOrOnePdf() {
+        assertEquals(listOf(Format.JPG, Format.PNG, Format.PDF), Targets.forInputs(listOf(Format.PDF), order, true))
+        assertEquals(listOf(Format.JPG, Format.PNG, Format.PDF), Targets.forInputs(listOf(Format.PDF, Format.PDF), order, true))
+        assertEquals("Compress", Targets.action(listOf(Format.PDF), Format.PDF))
+        assertEquals("Merge", Targets.action(listOf(Format.PDF, Format.PDF), Format.PDF))
+        assertEquals("JPG pages", Targets.action(listOf(Format.PDF), Format.JPG))
+        assertEquals("PDF", Targets.action(listOf(Format.JPG, Format.PNG), Format.PDF))
+    }
+
+    @Test fun mixedImagesAndPdfsFitNothing() {
+        assertTrue(Targets.forInputs(listOf(Format.JPG, Format.PDF), order, true).isEmpty())
     }
 
     @Test fun unknownOrEmptyInputFitsNothing() {
@@ -64,7 +79,7 @@ class TargetsTest {
     }
 
     @Test fun followsUserOrder() {
-        val custom = listOf(Format.WEBP, Format.JPG, Format.HEIC, Format.PNG)
+        val custom = listOf(Format.WEBP, Format.JPG, Format.HEIC, Format.PNG, Format.PDF)
         assertEquals(custom, Targets.forInputs(listOf(Format.PNG), custom, true))
     }
 }
@@ -74,6 +89,16 @@ class LimitsTest {
         assertEquals(30_000L, Limits.imageTimeoutMs(0))
         assertEquals(50_000L, Limits.imageTimeoutMs(10L * 1024 * 1024))
         assertEquals(300_000L, Limits.imageTimeoutMs(Limits.MAX_IMAGE_BYTES))
+    }
+
+    @Test fun pdfTimeoutScalesWithPagesAndIsCapped() {
+        assertEquals(60_000L, Limits.pdfTimeoutMs(0, 0))
+        assertEquals(660_000L, Limits.pdfTimeoutMs(300, 0))
+        assertEquals(1_800_000L, Limits.pdfTimeoutMs(Limits.MAX_PDF_PAGES, Limits.MAX_PDF_BYTES))
+    }
+
+    @Test(expected = IllegalArgumentException::class) fun presetRejectsBadDpi() {
+        Preset(dpi = 10)
     }
 
     @Test(expected = IllegalArgumentException::class) fun presetRejectsBadQuality() {

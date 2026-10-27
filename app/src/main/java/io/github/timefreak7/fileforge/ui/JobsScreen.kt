@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
+import io.github.timefreak7.fileforge.core.Format
+import io.github.timefreak7.fileforge.jobs.JobOp
 import io.github.timefreak7.fileforge.jobs.JobQueue
 import io.github.timefreak7.fileforge.jobs.JobView
 
@@ -50,13 +52,21 @@ fun JobsScreen(jobs: List<JobView>, contentPadding: PaddingValues) {
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val files = if (record.inputs.size == 1) record.inputs[0].name else "${record.inputs.size} files"
-                    Text("$files → ${record.target.label}", style = MaterialTheme.typography.titleMedium)
+                    val result = when (record.op) {
+                        JobOp.CONVERT -> record.target.label
+                        JobOp.PDF_TO_IMAGES -> "${record.target.label} pages"
+                        JobOp.COMBINE_PDF -> if (record.inputs.all { it.format == Format.PDF }) "Merged PDF" else "PDF"
+                        JobOp.COMPRESS_PDF -> "Smaller PDF"
+                        JobOp.ASSEMBLE_PDF -> "Edited PDF"
+                        JobOp.SPLIT_PDF -> "${record.splits.size} PDFs"
+                    }
+                    Text("$files → $result", style = MaterialTheme.typography.titleMedium)
                     Text(
                         when (job.state) {
                             WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED -> "Waiting to start"
                             WorkInfo.State.RUNNING -> "Converting: ${job.done} of ${job.total}"
                             WorkInfo.State.CANCELLED -> "Cancelled after $converted of ${job.total}"
-                            else -> if (failed.isEmpty()) "Done: $converted converted" else "$converted converted, ${failed.size} failed"
+                            else -> if (failed.isEmpty()) "Done: ${record.outputs.size} saved" else "${record.outputs.size} saved, ${failed.size} failed"
                         },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -66,6 +76,9 @@ fun JobsScreen(jobs: List<JobView>, contentPadding: PaddingValues) {
                             progress = { if (job.total == 0) 0f else job.done.toFloat() / job.total },
                             modifier = Modifier.fillMaxWidth(),
                         )
+                    }
+                    record.inputs.mapNotNull { it.note }.distinct().forEach { note ->
+                        Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     failed.take(5).forEach { input ->
                         Text("${input.name}: ${input.error}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

@@ -7,23 +7,30 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.graphics.Paint
+import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.os.SharedMemory
 import androidx.exifinterface.media.ExifInterface
 import androidx.heifwriter.HeifWriter
 import io.github.timefreak7.fileforge.core.FileNames
 import io.github.timefreak7.fileforge.core.Format
+import io.github.timefreak7.fileforge.core.PageSize
 import io.github.timefreak7.fileforge.core.Preset
 import io.github.timefreak7.fileforge.core.Sniffer
 import io.github.timefreak7.fileforge.image.ImageConverter
 import io.github.timefreak7.fileforge.image.ImageEngineClient
 import io.github.timefreak7.fileforge.image.ImageEngineClient.Outcome
+import io.github.timefreak7.fileforge.image.ParserFailure
+import io.github.timefreak7.fileforge.jobs.AppSettings
+import io.github.timefreak7.fileforge.pdf.PageRef
+import io.github.timefreak7.fileforge.pdf.PdfEngineClient
 import java.io.File
 import java.security.MessageDigest
 import kotlin.random.Random
 
 /**
- * Phase 1 gate checks that need a real phone, run from Settings in debug builds. Uses synthetic and
+ * Phase 1 and 2 gate checks that need a real phone, run from Settings in debug builds. Uses synthetic and
  * generated files only (spec: test corpus), in app cache; nothing is written to the output folder.
  */
 class SelfTest(
@@ -34,7 +41,7 @@ class SelfTest(
 ) {
     private val dir = File(context.cacheDir, "selftest").apply { deleteRecursively(); mkdirs() }
     private val heic = ImageEngineClient.heicEncodeAvailable
-    private val formats = Format.entries.filter { it != Format.HEIC || heic }
+    private val formats = Format.entries.filter { it.isImage && (it != Format.HEIC || heic) }
     private var done = 0
     private var total = 0
     private var step = ""
@@ -43,8 +50,8 @@ class SelfTest(
 
     suspend fun run(fuzzPerFormat: Int) {
         val n = formats.size
-        total = n * (n + 2) + 2 + 6 + 5 + SPEED_RUNS * 4 + PHOTOS + fuzzPerFormat * n + 2
-        ImageEngineClient(context).use { engine ->
+        total = n * (n + 2) + 2 + 6 + 5 + SPEED_RUNS * 4 + PHOTOS + fuzzPerFormat * n + 2 + PDF_TICKS + fuzzPerFormat
+        ImageEngineClient(context).use { engine -> PdfEngineClient(context).use { pdf ->
             section("Converting every format") { conversions(engine) }
             section("Rotated photos") { orientation(engine) }
             section("Photo details") { metadata(engine) }
@@ -52,7 +59,13 @@ class SelfTest(
             section("Speed check") { speed(engine) }
             section("100 mixed photos") { hundredPhotos(engine) }
             section("Fuzz pass") { fuzz(engine, fuzzPerFormat) }
-        }
+            section("PDF page tools") { pageTools(pdf) }
+            section("PDF ↔ images") { pdfAndImages(engine, pdf) }
+            section("Damaged PDFs") { damagedPdfs(pdf) }
+            section("300-page PDF") { bigPdf(pdf) }
+            section("PDF compression") { compression(pdf) }
+            section("PDF fuzz pass") { fuzzPdf(pdf, fuzzPerFormat) }
+        } }
         section("Security checks") { securityChecks() }
         dir.deleteRecursively()
         progress(total, total, "Done")
@@ -276,6 +289,200 @@ class SelfTest(
         }
     }
 
+    /** Rotate, delete, reorder and extract are all one assemble call; coloured pages show the order survived. */
+    private suspend fun pageTools(pdf: PdfEngineClient) {
+        val colours = listOf(Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW, Color.MAGENTA)
+        val source = makePdf(colours.size, "colours") { colours[it] }
+        report(pdf.pageCount(source) == 5, "Made a 5-page test PDF")
+        tick()
+        val out = File(dir, "tools.pdf")
+        val pages = pdf.assemble(listOf(source), listOf(PageRef(0, 4), PageRef(0, 0, 90), PageRef(0, 2)), out)
+        report(pages == 3 && pdf.pageCount(out) == 3, "Delete + reorder: 5 pages → $pages")
+        tick()
+        val order = (0 until 3).map { centre(pdf.renderBitmap(out, it, 100)) }
+        val expected = listOf(Color.MAGENTA, Color.RED, Color.BLUE)
+        report(order.zip(expected).all { (a, b) -> close(a, b) }, "Reorder kept the right pages (page colours checked by Android's PDF renderer)")
+        tick()
+        val turned = pdf.renderBitmap(out, 1, 100)
+        report(turned.width > turned.height, "Rotate: page 2 is landscape after a 90° turn (${turned.width}×${turned.height})")
+        tick()
+    }
+
+    /** PDF → JPG/PNG at 150 dpi, and photos → one A4 PDF, each reopened by a different reader than wrote it. */
+    private suspend fun pdfAndImages(engine: ImageEngineClient, pdf: PdfEngineClient) {
+        val source = makePdf(2, "pages") { Color.WHITE }
+        for (to in listOf(Format.JPG, Format.PNG)) {
+            val pixels = pdf.renderPixels(source, 0, 150)
+            val out = File(dir, "page.${to.extension}")
+            try {
+                engine.encode(pixels, out, to, 90)
+            } finally {
+                pixels.getParcelable("mem", SharedMemory::class.java)?.close()
+            }
+            val size = reopen(out)
+            report(size != null && kotlin.math.abs(size.first - 1240) <= 2 && kotlin.math.abs(size.second - 1754) <= 2, "PDF page → ${to.label} at 150 dpi: $size (expect about 1240×1754)")
+            tick()
+        }
+        val photos = listOf(pattern(1200, 800), pattern(800, 1200), pattern(1000, 1000)).mapIndexed { i, b -> write(b, Format.JPG, "photo$i") }
+        val out = File(dir, "photos.pdf")
+        val pages = pdf.imagesToPdf(photos, out, PageSize.A4)
+        val first = pdf.renderBitmap(out, 0, 200)
+        report(pages == 3 && pdf.pageCount(out) == 3 && first.width > first.height, "3 photos → A4 PDF: $pages pages; first page landscape (${first.width}×${first.height})")
+        tick()
+    }
+
+    /** Broken PDFs fail with a plain message (or open repaired); none takes the app down. */
+    private suspend fun damagedPdfs(pdf: PdfEngineClient) {
+        val good = makePdf(3, "good") { Color.WHITE }.readBytes()
+        val cases = mapOf(
+            "header only" to "%PDF-1.7\n".toByteArray(),
+            "truncated" to good.copyOf(good.size / 2),
+            "random after header" to "%PDF-1.4\n".toByteArray() + Random(3).nextBytes(20_000),
+            "no cross-reference table" to good.copyOf(good.size - 200),
+        )
+        for ((name, bytes) in cases) {
+            val f = File(dir, "bad.pdf").apply { writeBytes(bytes) }
+            val result = try {
+                "opened (repaired), ${pdf.pageCount(f)} pages"
+            } catch (e: ParserFailure) {
+                "\"${e.message}\""
+            }
+            report("crashed" !in result && "too long" !in result, "$name PDF: $result")
+            tick()
+        }
+    }
+
+    /** Phase 2 gate: a 300-page PDF merges and splits without running out of memory. */
+    private suspend fun bigPdf(pdf: PdfEngineClient) {
+        val big = makePdf(300, "big") { Color.WHITE }
+        val t0 = System.currentTimeMillis()
+        val merged = File(dir, "merged.pdf")
+        val pages = pdf.assemble(listOf(big, big), List(600) { PageRef(it / 300, it % 300) }, merged)
+        val mergeMs = System.currentTimeMillis() - t0
+        report(pages == 600 && pdf.pageCount(merged) == 600, "Merge 300 + 300 pages: $pages pages in $mergeMs ms (${big.length() / 1024} KB each)")
+        merged.delete()
+        tick()
+        val t1 = System.currentTimeMillis()
+        val part = File(dir, "part.pdf")
+        val counts = (0 until 10).map { k ->
+            step = "300-page PDF: split part ${k + 1} of 10"
+            pdf.assemble(listOf(big), List(30) { PageRef(0, k * 30 + it) }, part)
+            pdf.pageCount(part)
+        }
+        report(counts.all { it == 30 }, "Split 300 pages into 10 files of 30: ${counts.sum()} pages in ${System.currentTimeMillis() - t1} ms")
+        tick()
+    }
+
+    /** Phase 2 gate: a scanned PDF comes out at least 40% smaller and still readable. */
+    private suspend fun compression(pdf: PdfEngineClient) {
+        val (bitmapMs, yuvMs) = pdf.jpegProbe()
+        report(null, "JPEG encode in the isolated process, 12 MP: Bitmap.compress $bitmapMs ms, YuvImage $yuvMs ms")
+        tick()
+        val scans = (1..3).map { write(scanPage(it), Format.JPG, "scan$it") }
+        val scanned = File(dir, "scanned.pdf")
+        pdf.imagesToPdf(scans, scanned, PageSize.FIT)
+        scans.forEach { it.delete() }
+        val small = File(dir, "small.pdf")
+        val t0 = System.currentTimeMillis()
+        val defaults = AppSettings(context).defaultPreset(Format.PDF)
+        val replaced = pdf.compress(scanned, small, defaults.quality, defaults.dpi, 3)
+        val ms = System.currentTimeMillis() - t0
+        val saved = 100 - small.length() * 100 / scanned.length()
+        val diff = meanDifference(pdf.renderBitmap(scanned, 0, 600), pdf.renderBitmap(small, 0, 600))
+        report(
+            saved >= 40 && diff < 8 && pdf.pageCount(small) == 3,
+            "Scanned PDF (3 pages, 300 dpi): ${scanned.length() / 1024} KB → ${small.length() / 1024} KB, $saved% smaller, " +
+                "$replaced images replaced in $ms ms; page difference $diff of 255 (readable under 8)",
+        )
+        tick()
+    }
+
+    /** Spec gate: mutated PDFs through every PDF reader (PDFBox open, Android render, compress). */
+    private suspend fun fuzzPdf(pdf: PdfEngineClient, count: Int) {
+        val photos = listOf(pattern(640, 480), pattern(480, 640)).mapIndexed { i, b -> write(b, Format.JPG, "fz$i") }
+        val seedFile = File(dir, "fuzz-seed.pdf")
+        pdf.imagesToPdf(photos, seedFile, PageSize.A4)
+        val seed = seedFile.readBytes()
+        val random = Random(42)
+        var opened = 0
+        var rejected = 0
+        var crashed = 0
+        var timedOut = 0
+        repeat(count) { i ->
+            step = "PDF fuzz pass: ${i + 1} of $count"
+            val bytes = seed.copyOf()
+            repeat(random.nextInt(1, 40)) { bytes[random.nextInt(5, bytes.size)] = random.nextInt(256).toByte() }
+            val data = if (random.nextInt(4) == 0) bytes.copyOf(random.nextInt(5, bytes.size)) else bytes
+            val f = File(dir, "fuzz.pdf").apply { writeBytes(data) }
+            try {
+                pdf.pageCount(f)
+                pdf.renderPixels(f, 0, 36).getParcelable("mem", SharedMemory::class.java)?.close()
+                pdf.compress(f, File(dir, "fuzz-out.pdf"), 70, 72, 2)
+                opened++
+            } catch (e: ParserFailure) {
+                val m = e.message.orEmpty()
+                when {
+                    "crashed" in m -> crashed++
+                    "too long" in m -> timedOut++
+                    else -> rejected++
+                }
+            }
+            tick()
+        }
+        report(true, "Fuzz PDF × $count: app survived. $opened went through all three readers, $rejected rejected cleanly, $crashed crashed a reader (recovered), $timedOut timed out")
+    }
+
+    /** A test PDF made by Android's own PDF writer, so FileForge's readers see a file it did not write. */
+    private fun makePdf(pages: Int, name: String, background: (Int) -> Int): File {
+        val doc = PdfDocument()
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 28f; color = Color.BLACK }
+        val photo = pattern(400, 260)
+        repeat(pages) { i ->
+            val page = doc.startPage(PdfDocument.PageInfo.Builder(595, 842, i + 1).create())
+            page.canvas.drawColor(background(i))
+            page.canvas.drawText("FileForge test page ${i + 1}", 60f, 80f, text)
+            page.canvas.drawBitmap(photo, 60f, 120f, null)
+            doc.finishPage(page)
+        }
+        val f = File(dir, "$name.pdf")
+        f.outputStream().use { doc.writeTo(it) }
+        doc.close()
+        photo.recycle()
+        return f
+    }
+
+    /** An A4 page scanned at 300 dpi: off-white paper grain and lines of dark text. */
+    private fun scanPage(n: Int): Bitmap {
+        val w = 2480
+        val h = 3508
+        val random = Random(n)
+        val grain = IntArray(w * h) { val g = 238 + random.nextInt(12); Color.rgb(g, g, g - 4) }
+        val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply { setPixels(grain, 0, w, 0, 0, w, h) }
+        val c = Canvas(b)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(30, 30, 30); textSize = 48f }
+        for (line in 0 until 60) c.drawText("Page $n, line ${line + 1}: the quick brown fox jumps over the lazy dog 0123456789", 200f, 300f + line * 50f, p)
+        return b
+    }
+
+    private fun centre(b: Bitmap) = b.getPixel(b.width / 2, b.height / 2).also { b.recycle() }
+
+    private fun close(a: Int, b: Int) =
+        kotlin.math.abs(Color.red(a) - Color.red(b)) < 40 && kotlin.math.abs(Color.green(a) - Color.green(b)) < 40 && kotlin.math.abs(Color.blue(a) - Color.blue(b)) < 40
+
+    /** Mean per-channel difference between two renders of the same page, 0–255. */
+    private fun meanDifference(a: Bitmap, b: Bitmap): Long {
+        if (a.width != b.width || a.height != b.height) return 255
+        val pa = IntArray(a.width * a.height).also { a.getPixels(it, 0, a.width, 0, 0, a.width, a.height) }
+        val pb = IntArray(b.width * b.height).also { b.getPixels(it, 0, b.width, 0, 0, b.width, b.height) }
+        var sum = 0L
+        for (i in pa.indices) {
+            sum += kotlin.math.abs(Color.red(pa[i]) - Color.red(pb[i])) + kotlin.math.abs(Color.green(pa[i]) - Color.green(pb[i])) + kotlin.math.abs(Color.blue(pa[i]) - Color.blue(pb[i]))
+        }
+        a.recycle()
+        b.recycle()
+        return sum / (pa.size * 3L)
+    }
+
     private fun securityChecks() {
         // The right-to-left override is built at run time so the source stays free of bidi characters.
         val hostile = listOf("../../etc/passwd", "a/b\\c", "..", "evil" + Char(0x202E) + "gpj.exe", "x\u0000y")
@@ -334,6 +541,8 @@ class SelfTest(
     private companion object {
         const val PHOTOS = 100
         const val SPEED_RUNS = 3
+        /** Checks in the PDF sections, not counting the PDF fuzz pass. */
+        const val PDF_TICKS = 4 + 3 + 4 + 2 + 2
     }
 
     private fun describe(o: Outcome) = when (o) {

@@ -23,7 +23,8 @@ class AppSettings(context: Context) {
         get() = prefs.getInt("maxSide", 0)
         set(value) = prefs.edit().putInt("maxSide", value).apply()
 
-    fun quality(format: Format): Int = prefs.getInt("quality.${format.name}", 90)
+    /** PDF: the quality images inside a PDF are re-encoded at, when compressing or building one. */
+    fun quality(format: Format): Int = prefs.getInt("quality.${format.name}", if (format == Format.PDF) 75 else 90)
 
     fun setQuality(format: Format, value: Int) = prefs.edit().putInt("quality.${format.name}", value).apply()
 

@@ -108,7 +108,8 @@ fun SettingsScreen(
         Section("Default quality")
         Format.entries.filter { it.hasQuality }.forEach { format ->
             var q by remember { mutableFloatStateOf(settings.quality(format).toFloat()) }
-            Text("${format.label}: ${q.toInt()}", style = MaterialTheme.typography.bodyLarge)
+            val label = if (format == Format.PDF) "Images in PDFs" else format.label
+            Text("$label: ${q.toInt()}", style = MaterialTheme.typography.bodyLarge)
             Slider(
                 value = q,
                 onValueChange = { q = it },

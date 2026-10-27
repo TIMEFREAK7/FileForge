@@ -58,6 +58,8 @@ fun DonutOverlay(
     onConvert: (Format) -> Unit,
     onOptions: (Format) -> Unit,
     onDismiss: () -> Unit,
+    /** What each segment does to this selection ("Compress", "JPG pages"); defaults to the format name. */
+    label: (Format) -> String = { it.label },
 ) {
     val density = LocalDensity.current
     val view = LocalView.current
@@ -139,7 +141,7 @@ fun DonutOverlay(
                 val labelAngle = (i * sweep - 90) * PI / 180
                 val labelCenter = Offset(c.x + mid * cos(labelAngle).toFloat(), c.y + mid * sin(labelAngle).toFloat())
                 Text(
-                    text = format.label,
+                    text = label(format),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (isHovered) FontWeight.Bold else FontWeight.Medium,
                     color = when {
@@ -149,7 +151,7 @@ fun DonutOverlay(
                     },
                     modifier = Modifier
                         .centeredAt(labelCenter)
-                        .semantics { contentDescription = if (isEnabled) "Convert to ${format.label}" else "${format.label} not available" },
+                        .semantics { contentDescription = if (isEnabled) actionText(format, label(format)) else "${label(format)} not available" },
                 )
             }
             Text(
@@ -182,3 +184,5 @@ fun rememberUseListInsteadOfDonut(): Boolean {
     }
 }
 
+/** "Convert to JPG" for a plain conversion, the action itself ("Compress", "JPG pages") otherwise. */
+fun actionText(format: Format, label: String) = if (label == format.label) "Convert to ${format.label}" else label

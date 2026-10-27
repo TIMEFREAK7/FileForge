@@ -91,6 +91,7 @@ com.google.testing.platform:android-test-plugin:0.0.9-alpha03=_internal-unified-
 com.google.testing.platform:core-proto:0.0.9-alpha03=_internal-unified-test-platform-android-device-provider-ddmlib,_internal-unified-test-platform-android-test-plugin-host-apk-installer,_internal-unified-test-platform-android-test-plugin-result-listener-gradle
 com.google.testing.platform:core:0.0.9-alpha03=_internal-unified-test-platform-core
 com.google.testing.platform:launcher:0.0.9-alpha03=_internal-unified-test-platform-android-test-plugin-host-additional-test-output,_internal-unified-test-platform-android-test-plugin-host-device-info,_internal-unified-test-platform-android-test-plugin-host-logcat,_internal-unified-test-platform-launcher
+com.tom-roush:pdfbox-android:2.0.27.0=debugAndroidTestRuntimeClasspath,debugRuntimeClasspath,debugUnitTestRuntimeClasspath,releaseRuntimeClasspath,releaseUnitTestRuntimeClasspath
 commons-io:commons-io:2.16.1=_internal-unified-test-platform-android-test-plugin-host-emulator-control
 io.grpc:grpc-api:1.57.2=_internal-unified-test-platform-core
 io.grpc:grpc-api:1.69.1=_internal-unified-test-platform-android-test-plugin-host-emulator-control,_internal-unified-test-platform-android-test-plugin-result-listener-gradle

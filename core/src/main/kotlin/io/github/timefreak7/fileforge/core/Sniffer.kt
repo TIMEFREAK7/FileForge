@@ -14,6 +14,8 @@ object Sniffer {
             at(0) == 0x89 && ascii(1, 3) == "PNG" -> Format.PNG
             ascii(0, 4) == "RIFF" && ascii(8, 4) == "WEBP" -> Format.WEBP
             ascii(4, 4) == "ftyp" && ascii(8, 4) in heifBrands -> Format.HEIC
+            // shortcut: header only at byte 0; readers also accept it within the first 1 KB. Widen if real files need it.
+            ascii(0, 5) == "%PDF-" -> Format.PDF
             else -> null
         }
     }

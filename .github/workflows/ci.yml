@@ -28,7 +28,7 @@ jobs:
         run: ./gradlew assembleRelease assembleDebug assembleDebugAndroidTest :tools:permission-canary:assembleRelease --console=plain
 
       - name: Unit tests and lint
-        run: ./gradlew testDebugUnitTest :core:test :app:lintDebug :jobs:lintDebug :engine-image:lintDebug --console=plain
+        run: ./gradlew testDebugUnitTest :core:test :app:lintDebug :jobs:lintDebug :engine-image:lintDebug :engine-pdf:lintDebug --console=plain
 
       - name: S11 vulnerability scan (OSV) of everything in the lockfiles
         run: python3 scripts/osv_scan.py

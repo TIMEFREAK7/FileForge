@@ -25,6 +25,7 @@ kotlin {
 
 dependencies {
     api(project(":engine-image"))
+    api(project(":engine-pdf"))
     api(libs.work.runtime.ktx)
     implementation(libs.coroutines.android)
 }
