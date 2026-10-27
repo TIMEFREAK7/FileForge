@@ -52,7 +52,10 @@ Send screenshots of steps 2 and 7, and note anything that looked wrong in the ot
 | Swiped-away job | Passed: job finished after FileForge was swiped away |
 | Motion bars | Passed on the `profile` build: with the donut open, FileForge's bars stay under the green line apart from isolated spikes |
 | Optimised (R8) build on the phone | Runs: conversions, donut, Jobs and snackbar colours work |
-| Airplane mode, TalkBack | Not yet checked |
+| Airplane mode | Passed: conversion works with airplane mode on |
+| TalkBack | Passed: long-press shows the list of formats instead of the donut |
+
+**Phase 1 gate: passed** on the OnePlus 13, Oct 27, 2026.
 
 ## Not done yet (honest gaps)
 
