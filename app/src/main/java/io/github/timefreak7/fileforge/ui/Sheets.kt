@@ -2,6 +2,7 @@ package io.github.timefreak7.fileforge.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -73,7 +74,8 @@ fun OptionsSheet(
                 Slider(value = quality, onValueChange = { quality = it }, valueRange = 10f..100f, steps = 17)
             }
             Text("Size (longest side)", style = MaterialTheme.typography.titleSmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Wraps: four chips do not fit one line on a phone at larger font sizes.
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SizeChoices.forEach { px ->
                     FilterChip(
                         selected = maxSide == px,
