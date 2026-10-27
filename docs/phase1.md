@@ -50,7 +50,8 @@ Send screenshots of steps 2 and 7, and note anything that looked wrong in the ot
 | Speed, 12 MP JPG → JPG | ~210 ms (decode 80 ms isolated + encode 130 ms in `:media`); was 5.1 s with encoding in the isolated process |
 | Share from another app | Google Photos → FileForge (also in its floating window) → donut → 5 files to WebP |
 | Swiped-away job | Passed: job finished after FileForge was swiped away |
-| Motion bars | Pending: debug builds are unoptimised, so this is measured on the `profile` build |
+| Motion bars | Passed on the `profile` build: with the donut open, FileForge's bars stay under the green line apart from isolated spikes |
+| Optimised (R8) build on the phone | Runs: conversions, donut, Jobs and snackbar colours work |
 | Airplane mode, TalkBack | Not yet checked |
 
 ## Not done yet (honest gaps)

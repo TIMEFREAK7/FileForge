@@ -16,7 +16,10 @@ import io.github.timefreak7.fileforge.core.Preset
 import io.github.timefreak7.fileforge.core.Sniffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
@@ -31,6 +34,9 @@ data class IncomingFile(val uri: Uri, val name: String, val format: Format?)
 
 object JobQueue {
     private const val TAG = "job"
+
+    /** Bumped when job records change without any WorkManager state change (Remove, Retry). */
+    private val recordsChanged = MutableStateFlow(0)
 
     /** Display name and claimed type of a content URI, for the donut. The real type is sniffed on copy. */
     fun describe(context: Context, uri: Uri): IncomingFile {
@@ -65,6 +71,7 @@ object JobQueue {
         val job = store.load(id) ?: return
         store.save(job.copy(inputs = job.inputs.map { if (it.done) it else it.copy(error = null) }))
         start(context, id)
+        recordsChanged.update { it + 1 }
     }
 
     fun cancel(context: Context, id: String) {
@@ -75,11 +82,13 @@ object JobQueue {
     fun dismiss(context: Context, id: String) {
         WorkManager.getInstance(context).cancelUniqueWork(id)
         JobStore(context).delete(id)
+        recordsChanged.update { it + 1 }
     }
 
     fun observe(context: Context): Flow<List<JobView>> {
         val store = JobStore(context)
-        return WorkManager.getInstance(context).getWorkInfosByTagFlow(TAG).map { infos ->
+        // Removing a finished job changes no WorkInfo, so record changes are a second trigger.
+        return combine(WorkManager.getInstance(context).getWorkInfosByTagFlow(TAG), recordsChanged) { infos, _ ->
             // Retry replaces the work, so one job can have several; the unfinished one wins.
             val byId = infos
                 .mapNotNull { info -> info.tags.firstOrNull { it != TAG && !it.contains('.') }?.let { it to info } }
@@ -96,7 +105,7 @@ object JobQueue {
                     record.inputs.size,
                 )
             }
-        }
+        }.flowOn(Dispatchers.IO) // reads job files; keep it off the UI thread
     }
 
     /** Clears temporary outputs and old job data; runs at every app start. */
