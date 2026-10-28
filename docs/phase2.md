@@ -29,6 +29,18 @@ Install the debug APK over the old one, then:
 
 Send screenshots of step 1 and anything that looked wrong.
 
+## Results — OnePlus 13, Oct 28, 2026
+
+| Gate item | Result |
+| --- | --- |
+| Self-tests, Quick | 59 of 59 passed in 47 s |
+| 300-page merge and split | Merge 300 + 300 → 600 pages in 562 ms; split into 10 × 30 pages in 1.5 s; no memory failure |
+| Scanned PDF compression | 7,366 KB → 1,452 KB (81% smaller), page difference 2 of 255 |
+| JPEG encode in the isolated process | Bitmap.compress 10,125 ms vs YuvImage 302 ms: the YuvImage route is confirmed |
+| Fuzz PDF × 50 (Quick) | App survived; 0 reader crashes, 0 timeouts. The 1,000-file Full run is still to do |
+| Real files from the app | Compress (a lean PDF correctly saved nothing), photo → PDF, HEIC → JPG, merge, JPG pages |
+| Fixed | Each share or Open with left another FileForge card in recent apps; the activity is now single-task |
+
 ## Not done yet (honest gaps)
 
 - **Password-protected PDFs are not supported yet.** They fail with "This PDF needs a password to open. Password support comes in a later update." The Phase 2 gate item "merging a protected PDF gives a protected output" (and S14) cannot pass until this lands, so **the Phase 2 gate stays open** even if every self-test passes.

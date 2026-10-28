@@ -13,11 +13,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.FileForge">
 
-        <!-- S3: the only exported component. It is the launcher, the share target and the Open-with target. -->
+        <!-- S3: the only exported component. It is the launcher, the share target and the Open-with target.
+             singleTask: a share or Open with reuses the one FileForge window (onNewIntent) instead of
+             stacking a new copy inside the sending app. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
