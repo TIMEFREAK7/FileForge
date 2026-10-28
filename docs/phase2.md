@@ -46,6 +46,5 @@ Send screenshots of step 1 and anything that looked wrong.
 - **Password-protected PDFs are not supported yet.** They fail with "This PDF needs a password to open. Password support comes in a later update." The Phase 2 gate item "merging a protected PDF gives a protected output" (and S14) cannot pass until this lands, so **the Phase 2 gate stays open** even if every self-test passes.
 - Merge, split and page tools keep the pages' content, but **form fields stop working, bookmarks are dropped and links within the document may break**; compress keeps all three. Images inside form XObjects are not compressed.
 - Compress replaces an image only when the JPEG is smaller; a PDF that is already lean comes back with a note and no copy.
-- The isolated-process JPEG encoder (YuvImage route) is unmeasured on the phone; the self-test's probe line reports it.
 - No "grid of PDF tools" on Home: merge, compress and PDF → images are donut segments, and the organiser has its own button.
 - Gaps carried from Phase 1 (liquid-glass look, Folders screen, S4 instrumented test) still stand.
