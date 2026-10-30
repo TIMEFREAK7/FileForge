@@ -227,11 +227,13 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
             val formats = d.files.map { it.format }
             val enabled = Targets.forInputs(formats, order, ImageEngineClient.heicEncodeAvailable).toSet()
             val label = { f: Format -> Targets.action(formats, f) }
+            val editPages = if (formats.all { it == Format.PDF }) ({ donut = null; pdfPages = d.files }) else null
             if (useList) {
                 TargetListDialog(
                     targets = order.filter { it in enabled },
                     fileCount = d.files.size,
                     label = label,
+                    onEditPages = editPages,
                     onConvert = { convert(d.files, it, settings.defaultPreset(it)) },
                     onOptions = { options = OptionsState(d.files, it); donut = null },
                     onDismiss = { donut = null },
@@ -247,6 +249,7 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                     onOptions = { options = OptionsState(d.files, it); donut = null },
                     onDismiss = { donut = null },
                     label = label,
+                    onEditPages = editPages,
                 )
             }
         }

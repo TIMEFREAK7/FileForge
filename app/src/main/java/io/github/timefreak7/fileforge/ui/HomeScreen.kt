@@ -88,7 +88,10 @@ fun HomeScreen(
         }
         item {
             OutlinedButton(onClick = onEditPdf, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
-                Text("Edit PDF pages", style = MaterialTheme.typography.titleMedium)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Edit PDF pages", style = MaterialTheme.typography.titleMedium)
+                    Text("Rotate, delete, reorder, join or split", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
         item {

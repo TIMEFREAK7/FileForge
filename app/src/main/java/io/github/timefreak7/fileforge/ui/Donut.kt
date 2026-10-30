@@ -8,6 +8,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,13 +31,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import io.github.timefreak7.fileforge.core.Format
-import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlinx.coroutines.delay
 
 private val InnerRadius = 52.dp
 private val OuterRadius = 132.dp
@@ -60,6 +62,8 @@ fun DonutOverlay(
     onDismiss: () -> Unit,
     /** What each segment does to this selection ("Compress", "JPG pages"); defaults to the format name. */
     label: (Format) -> String = { it.label },
+    /** Shown as a button under the ring when the selection is all PDFs: opens the page organiser. */
+    onEditPages: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val view = LocalView.current
@@ -160,6 +164,14 @@ fun DonutOverlay(
                 color = colors.onSurface,
                 modifier = Modifier.centeredAt(c),
             )
+            if (onEditPages != null) {
+                // Under the ring, or above it when the ring sits near the bottom of the screen.
+                val gap = with(density) { 44.dp.toPx() }
+                val y = if (c.y + outer + gap * 1.5f < height) c.y + outer + gap else c.y - outer - gap
+                FilledTonalButton(onClick = onEditPages, modifier = Modifier.centeredAt(Offset(c.x, y)).heightIn(min = 48.dp)) {
+                    Text("Edit pages")
+                }
+            }
         }
     }
 }
