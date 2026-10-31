@@ -523,7 +523,7 @@ class SelfTest(
             val specFile = File(dir, "$name.json").apply { writeText(spec.toJson()) }
             return File(dir, "$name.pdf").also { pdf.edit(source, specFile, stamps, it) }
         }
-        suspend fun page(f: File) = pdf.renderBitmap(f, 0, 400)
+        suspend fun page(f: File, widthPx: Int = 400) = pdf.renderBitmap(f, 0, widthPx)
         fun Bitmap.at(u: Float, v: Float) = getPixel((u * (width - 1)).toInt(), (v * (height - 1)).toInt())
         fun yellow(c: Int) = Color.red(c) > 200 && Color.green(c) > 200 && Color.blue(c) < 150
         fun white(c: Int) = Color.red(c) > 230 && Color.green(c) > 230 && Color.blue(c) > 230
@@ -576,8 +576,9 @@ class SelfTest(
             val stamp = renderFieldStamp("पुणे", city.widthPt, city.heightPt, dir)
             val out = edited("filled", form, EditSpec(fields = mapOf("name" to "Aditya"), stampedFields = mapOf("city" to 0)), listOf(stamp))
             val (after, _) = pdf.formFields(out)
-            // city: rect (60, 640, 300 × 30) on an A4 page; v runs from the top.
-            val n = dark(page(out), 60 / 595f, (842 - 670) / 842f, 360 / 595f, (842 - 640) / 842f)
+            // city: rect (60, 640, 300 × 30) on an A4 page; v runs from the top. Rendered sharp: at 400 px the
+            // 14 pt word is ~9 px tall and its anti-aliased strokes leave too few fully dark pixels to count.
+            val n = dark(page(out, 1200), 60 / 595f, (842 - 670) / 842f, 360 / 595f, (842 - 640) / 842f)
             (fields.map { it.name } == listOf("name", "city") && after.singleOrNull()?.value == "Aditya" && n > 20) to
                 "fields ${fields.map { it.name }} → ${after.map { "${it.name}=${it.value}" }}, city stamped ($n dark pixels)"
         }
