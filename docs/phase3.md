@@ -29,6 +29,20 @@ Scope from [spec.md](spec.md#build-phases-and-testing-gates): annotate, sign, fi
 
 Send screenshots of step 1, and of anything that looks wrong.
 
+## Results — OnePlus 13
+
+| Gate item | Result |
+| --- | --- |
+| Self-tests, Quick | 73 of 73 passed in 47 s |
+| Marks and signature in a second reader | Passed (self-test, Android's renderer) |
+| Marks on a rotated page | Passed (self-test) |
+| Devanagari text box and form value drawn | Passed (self-test); shaping still to be checked by eye |
+| XFA form gives a clean error | Passed (self-test) |
+| S13 redaction byte search | Passed (self-test) |
+| Editor on the phone, signed and marked-up PDF opened in another app, Devanagari by eye, real form, Hide, TalkBack | Not yet tried |
+
+The first run failed the form check at 18 dark pixels against 20: the check counted a 9 px tall word in a 400 px render. It now renders at 1200 px with the same threshold.
+
 ## Not done yet (honest gaps)
 
 - **Marks are drawn into the page.** Every reader shows them, but other apps cannot move or delete them afterwards (they are not PDF comment objects).
