@@ -90,6 +90,8 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
     var options by remember { mutableStateOf<OptionsState?>(null) }
     var selfTest by remember { mutableStateOf(false) }
     var pdfPages by remember { mutableStateOf<List<IncomingFile>?>(null) }
+    var editorFile by remember { mutableStateOf<IncomingFile?>(null) }
+    var signaturesOpen by remember { mutableStateOf(false) }
     val jobs by remember { JobQueue.observe(context) }.collectAsStateWithLifecycle(emptyList())
     // Password prompts open by themselves for jobs started in this session; older ones via their Jobs card.
     val sessionStart = remember { System.currentTimeMillis() }
@@ -122,6 +124,9 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
     val pdfPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) scope.launch { pdfPages = withContext(Dispatchers.IO) { uris.map { JobQueue.describe(context, it) } } }
     }
+    val editorPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch { editorFile = withContext(Dispatchers.IO) { JobQueue.describe(context, uri) } }
+    }
 
     // Shared or opened-with files go straight to the donut once an output folder exists.
     LaunchedEffect(incoming, outputTree) {
@@ -151,6 +156,14 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
 
     if (outputTree == null) {
         OutputFolderScreen(onChoose = { folderPicker.launch(DocumentsFolder) })
+        return
+    }
+    editorFile?.let { start ->
+        PdfEditorScreen(start, onQueued = { scope.launch { showQueued(it) } }, onClose = { editorFile = null })
+        return
+    }
+    if (signaturesOpen) {
+        SignaturesScreen(onClose = { signaturesOpen = false })
         return
     }
     pdfPages?.let { start ->
@@ -198,6 +211,7 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                     contentPadding = padding,
                     onPickFiles = { filePicker.launch(arrayOf("image/*", "application/pdf")) },
                     onEditPdf = { pdfPicker.launch(arrayOf("application/pdf")) },
+                    onMarkUpPdf = { editorPicker.launch(arrayOf("application/pdf")) },
                     drag = DonutDrag(
                         onStart = { file, p ->
                             snackbar.currentSnackbarData?.dismiss()
@@ -230,6 +244,7 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                     contentPadding = padding,
                     onChooseFolder = { folderPicker.launch(outputTree ?: DocumentsFolder) },
                     onSelfTest = if (debugTools) ({ selfTest = true }) else null,
+                    onSignatures = { signaturesOpen = true },
                 )
             }
         }
@@ -238,13 +253,16 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
             val formats = d.files.map { it.format }
             val enabled = Targets.forInputs(formats, order, ImageEngineClient.heicEncodeAvailable).toSet()
             val label = { f: Format -> Targets.action(formats, f) }
-            val editPages = if (formats.all { it == Format.PDF }) ({ donut = null; pdfPages = d.files }) else null
+            val actions = buildList<Pair<String, () -> Unit>> {
+                if (formats.all { it == Format.PDF }) add("Edit pages" to { donut = null; pdfPages = d.files })
+                if (formats == listOf(Format.PDF)) add("Sign & mark up" to { donut = null; editorFile = d.files[0] })
+            }
             if (useList) {
                 TargetListDialog(
                     targets = order.filter { it in enabled },
                     fileCount = d.files.size,
                     label = label,
-                    onEditPages = editPages,
+                    actions = actions,
                     onConvert = { convert(d.files, it, settings.defaultPreset(it)) },
                     onOptions = { options = OptionsState(d.files, it); donut = null },
                     onDismiss = { donut = null },
@@ -260,7 +278,7 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                     onOptions = { options = OptionsState(d.files, it); donut = null },
                     onDismiss = { donut = null },
                     label = label,
-                    onEditPages = editPages,
+                    actions = actions,
                 )
             }
         }

@@ -16,6 +16,7 @@ import io.github.timefreak7.fileforge.core.FileNames
 import io.github.timefreak7.fileforge.core.Format
 import io.github.timefreak7.fileforge.image.ImageEngineClient
 import io.github.timefreak7.fileforge.image.ParserFailure
+import io.github.timefreak7.fileforge.pdf.EditSpec
 import io.github.timefreak7.fileforge.pdf.PageRef
 import io.github.timefreak7.fileforge.pdf.PdfEngineClient
 import io.github.timefreak7.fileforge.pdf.PdfEngineClient.Companion.isPassword
@@ -64,6 +65,7 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                         checkPasswords(pdf)
                         assemble(pdf, job.pages, suffix = if (chosen == null) "_edited" else "")
                     }
+                    JobOp.EDIT_PDF -> eachInput { i, input -> editPdf(pdf, i, input) }
                     JobOp.SPLIT_PDF -> whole {
                         checkPasswords(pdf)
                         split(pdf)
@@ -233,6 +235,32 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         val temp = File(workDir, "out.pdf")
         pdf.assemble(job.inputs.indices.map { source(it) }, pages, temp, job.inputs.indices.map(::password), job.removePassword)
         save(temp, name(job.inputs[0], Format.PDF, suffix), Format.PDF)
+    }
+
+    /** Marks, stamps and form values first; then hidden areas, which rasterise those pages last. */
+    private suspend fun editPdf(pdf: PdfEngineClient, index: Int, input: JobInput) {
+        val src = source(index)
+        val dir = store.inputDir(job.id)
+        val specFile = File(dir, JobQueue.EDIT_SPEC)
+        val spec = EditSpec.fromJson(specFile.readText())
+        val stamps = List(File(dir, JobQueue.STAMPS).list()?.size ?: 0) { File(dir, "${JobQueue.STAMPS}/$it.png") }
+        val edited = File(workDir, "$index-edited.pdf")
+        var current = src
+        if (spec.hasEdits) {
+            // The password stays on the in-between file; redaction removes it at the end if asked.
+            pdf.edit(src, specFile, stamps, edited, password(index), job.removePassword && !spec.hasRedactions)
+            current = edited
+        }
+        val out = if (spec.hasRedactions) {
+            File(workDir, "$index-redacted.pdf").also { pdf.redact(current, specFile, it, password(index), job.removePassword) }
+        } else {
+            current
+        }
+        try {
+            save(out, name(input, Format.PDF, if (chosen != null) "" else if (spec.hasRedactions) "_redacted" else "_edited"), Format.PDF)
+        } finally {
+            edited.delete()
+        }
     }
 
     /** One file per group; carries on from the last saved part after Retry or a restart. */

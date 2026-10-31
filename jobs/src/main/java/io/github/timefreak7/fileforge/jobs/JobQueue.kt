@@ -13,6 +13,7 @@ import io.github.timefreak7.fileforge.core.Format
 import io.github.timefreak7.fileforge.core.Limits
 import io.github.timefreak7.fileforge.core.Preset
 import io.github.timefreak7.fileforge.core.Sniffer
+import io.github.timefreak7.fileforge.pdf.EditSpec
 import io.github.timefreak7.fileforge.pdf.PageRef
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -70,6 +71,30 @@ object JobQueue {
         pages, splits, passwords, removePassword,
     )
 
+    /**
+     * The editor's result for one PDF. [spec] and [stamps] are stored beside the input copy, so they are
+     * deleted with it when the job is done (form values can be personal) and kept for Retry otherwise.
+     */
+    suspend fun enqueueEdit(
+        context: Context,
+        file: IncomingFile,
+        spec: EditSpec,
+        stamps: List<File>,
+        preset: Preset,
+        password: String?,
+        removePassword: Boolean,
+    ): String = add(
+        context, listOf(file), Format.PDF, preset, JobOp.EDIT_PDF,
+        passwords = password?.let { mapOf(0 to it) }.orEmpty(), removePassword = removePassword,
+    ) { dir ->
+        File(dir, EDIT_SPEC).writeText(spec.toJson())
+        File(dir, STAMPS).mkdirs()
+        stamps.forEachIndexed { i, f -> f.copyTo(File(dir, "$STAMPS/$i.png"), overwrite = true) }
+    }
+
+    const val EDIT_SPEC = "edit.json"
+    const val STAMPS = "stamps"
+
     private suspend fun add(
         context: Context,
         files: List<IncomingFile>,
@@ -80,6 +105,7 @@ object JobQueue {
         splits: List<List<PageRef>> = emptyList(),
         passwords: Map<Int, String> = emptyMap(),
         removePassword: Boolean = false,
+        extras: (File) -> Unit = {},
     ): String = withContext(Dispatchers.IO) {
         require(files.size <= Limits.MAX_FILES_PER_JOB) { "too many files" }
         val store = JobStore(context)
@@ -87,6 +113,7 @@ object JobQueue {
         store.inputDir(id).mkdirs()
         val pdf = op != JobOp.CONVERT && (op != JobOp.COMBINE_PDF || files.all { it.format == Format.PDF })
         val inputs = files.mapIndexed { i, f -> copyIn(context, f, store.inputFile(id, i), pdf) }
+        extras(store.inputDir(id))
         store.save(JobRecord(id, System.currentTimeMillis(), target, preset, inputs, op, pages = pages, splits = splits, removePassword = removePassword))
         PdfPasswords.add(id, passwords)
         start(context, id)

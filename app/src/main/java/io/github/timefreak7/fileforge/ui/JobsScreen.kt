@@ -59,6 +59,7 @@ fun JobsScreen(jobs: List<JobView>, contentPadding: PaddingValues, onEnterPasswo
                         JobOp.COMPRESS_PDF -> "Smaller PDF"
                         JobOp.ASSEMBLE_PDF -> "Edited PDF"
                         JobOp.SPLIT_PDF -> "${record.splits.size} PDFs"
+                        JobOp.EDIT_PDF -> "Marked-up PDF"
                     }
                     Text("$files → $result", style = MaterialTheme.typography.titleMedium)
                     Text(

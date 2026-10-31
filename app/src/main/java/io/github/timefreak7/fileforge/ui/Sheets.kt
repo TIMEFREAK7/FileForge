@@ -169,7 +169,7 @@ fun TargetListDialog(
     targets: List<Format>,
     fileCount: Int,
     label: (Format) -> String,
-    onEditPages: (() -> Unit)?,
+    actions: List<Pair<String, () -> Unit>>,
     onConvert: (Format) -> Unit,
     onOptions: (Format) -> Unit,
     onDismiss: () -> Unit,
@@ -180,10 +180,8 @@ fun TargetListDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (targets.isEmpty()) Text("FileForge cannot convert these files.")
-                if (onEditPages != null) {
-                    OutlinedButton(onClick = onEditPages, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-                        Text("Edit pages: rotate, delete, reorder, split")
-                    }
+                actions.forEach { (label, action) ->
+                    OutlinedButton(onClick = action, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text(label) }
                 }
                 targets.forEach { format ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

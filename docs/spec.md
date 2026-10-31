@@ -55,7 +55,7 @@ v1 is everything that converts well offline with Android's own APIs or small lib
 | PDF page tools | v1 | Rotate, delete, reorder, extract pages |
 | PDF → images | v1 | PNG or JPG per page at a chosen DPI |
 | Sign PDF (drawn signature) | v1 | Signature image stamped on the page; not a cryptographic signature |
-| Annotate PDF | v1 | Pen, highlight, text box, shapes. Latin-script text is written as PDF text; Devanagari and other complex scripts are laid out by Android's text engine and stamped as an image, because PDFBox does no script shaping (that text is not selectable) |
+| Annotate PDF | v1 | Pen, highlight, text box, shapes, drawn into the page content so every reader shows them (other apps cannot edit or remove them afterwards). Latin-script text is written as PDF text; Devanagari and other complex scripts are laid out by Android's text engine and stamped as an image, because PDFBox does no script shaping (that text is not selectable) |
 | Fill PDF forms | v1 | Existing AcroForm fields only; XFA forms are not supported and show a plain error. Values in complex scripts are flattened as a stamped image, so that field is no longer editable |
 | Redact PDF | v1 | Redacted pages are rasterised so hidden text is removed, not just covered. The output is always a full save (never incremental), with document info, XMP metadata, attachments and bookmarks stripped |
 | Password-protected PDFs | v1 | The password is asked for each job, in a prompt that opens when the job finds a protected file (and in the organiser when the file is added). Outputs stay protected with the same password by default (AES-256; the owner password is random, so the input's restrictions carry over); the prompt offers "Save without a password". PDF → images warns that images cannot have a password |
@@ -105,7 +105,7 @@ Nine screens, one activity, built in Jetpack Compose.
 | Options sheet | Per-format preset: quality, size, DPI, page size, file name ("Save without a password" lives in the password prompt, where it applies) |
 | Jobs | Queue with progress, cancel, retry, and the error in plain words when one fails |
 | PDF organiser | Page thumbnails to merge (Add PDF), split before selected pages, extract, reorder, rotate, delete |
-| PDF editor | Viewer with pen, highlight, text box, shapes, signature, form fill, redact |
+| PDF editor | One page at a time (drawing never fights scrolling) with pen, highlight, text box, box, circle, line, signature, hide (redact) and undo; form fields as a plain list in a sheet. Reached from Home ("Sign & mark up a PDF") and the donut for a single PDF |
 | Signatures | Draw, save and delete signatures; stored only inside the app |
 | Settings | Output folder, default presets, donut segment order, keep-or-strip metadata, open-source licences |
 

@@ -28,6 +28,7 @@ import io.github.timefreak7.fileforge.jobs.IncomingFile
 import io.github.timefreak7.fileforge.jobs.JobQueue
 import io.github.timefreak7.fileforge.jobs.JobRecord
 import io.github.timefreak7.fileforge.jobs.JobStore
+import io.github.timefreak7.fileforge.pdf.EditSpec
 import io.github.timefreak7.fileforge.pdf.PageRef
 import io.github.timefreak7.fileforge.pdf.PdfEngineClient
 import java.io.File
@@ -71,6 +72,7 @@ class SelfTest(
             section("PDF compression") { compression(pdf) }
             section("PDF fuzz pass") { fuzzPdf(pdf, fuzzPerFormat) }
             section("Protected PDFs") { passwords(pdf) }
+            section("PDF editor") { editor(pdf) }
         } }
         section("Security checks") { securityChecks() }
         dir.deleteRecursively()
@@ -511,6 +513,113 @@ class SelfTest(
         tick()
     }
 
+    /**
+     * Phase 3 gate: marks, a signature, form values and Devanagari written by PDFBox must show when Android's
+     * renderer (a second reader) draws the page; XFA gives a clean error; redaction passes the S13 byte search.
+     */
+    private suspend fun editor(pdf: PdfEngineClient) {
+        val plain = makePdf(1, "edit") { Color.WHITE }
+        suspend fun edited(name: String, source: File, spec: EditSpec, stamps: List<File> = emptyList()): File {
+            val specFile = File(dir, "$name.json").apply { writeText(spec.toJson()) }
+            return File(dir, "$name.pdf").also { pdf.edit(source, specFile, stamps, it) }
+        }
+        suspend fun page(f: File) = pdf.renderBitmap(f, 0, 400)
+        fun Bitmap.at(u: Float, v: Float) = getPixel((u * (width - 1)).toInt(), (v * (height - 1)).toInt())
+        fun yellow(c: Int) = Color.red(c) > 200 && Color.green(c) > 200 && Color.blue(c) < 150
+        fun white(c: Int) = Color.red(c) > 230 && Color.green(c) > 230 && Color.blue(c) > 230
+        fun dark(b: Bitmap, u0: Float, v0: Float, u1: Float, v1: Float): Int {
+            var n = 0
+            for (x in (u0 * b.width).toInt() until (u1 * b.width).toInt()) for (y in (v0 * b.height).toInt() until (v1 * b.height).toInt()) {
+                if (Color.red(b.getPixel(x, y)) < 100) n++
+            }
+            return n
+        }
+
+        check("Marks show in a second reader") {
+            val out = edited("marks", plain, EditSpec(listOf(
+                EditSpec.Mark(0, EditSpec.Kind.HIGHLIGHT, listOf(0.1f, 0.6f, 0.5f, 0.7f), 0xFFFFEB3B.toInt()),
+                EditSpec.Mark(0, EditSpec.Kind.INK, listOf(0.1f, 0.8f, 0.9f, 0.8f), 0xFFC62828.toInt(), width = 6f),
+                EditSpec.Mark(0, EditSpec.Kind.TEXT, listOf(0.1f, 0.9f), text = "Signed copy", size = 14f),
+            )))
+            val b = page(out)
+            val red = b.at(0.5f, 0.8f)
+            val ok = yellow(b.at(0.3f, 0.65f)) && Color.red(red) > 150 && Color.green(red) < 100 && white(b.at(0.7f, 0.65f)) && dark(b, 0.1f, 0.9f, 0.4f, 0.95f) > 0
+            ok to "highlight, pen and text drawn where placed (Android's renderer)"
+        }
+        check("Marks land right on a rotated page") {
+            val turned = File(dir, "turned.pdf").also { pdf.assemble(listOf(plain), listOf(PageRef(0, 0, 90)), it) }
+            val out = edited("turned-marks", turned, EditSpec(listOf(EditSpec.Mark(0, EditSpec.Kind.HIGHLIGHT, listOf(0.05f, 0.05f, 0.45f, 0.45f), 0xFFFFEB3B.toInt()))))
+            val b = page(out)
+            (b.width > b.height && yellow(b.at(0.25f, 0.25f)) && !yellow(b.at(0.25f, 0.75f))) to "highlight at the top-left of the page as shown"
+        }
+        check("Signature stamp shows with a clear background") {
+            val sig = File(dir, "sig.png")
+            Bitmap.createBitmap(300, 100, Bitmap.Config.ARGB_8888).apply {
+                Canvas(this).drawRect(0f, 40f, 300f, 60f, Paint().apply { color = Color.BLACK })
+                sig.outputStream().use { compress(Bitmap.CompressFormat.PNG, 100, it) }
+                recycle()
+            }
+            val out = edited("signed", plain, EditSpec(listOf(EditSpec.Mark(0, EditSpec.Kind.IMAGE, listOf(0.1f, 0.6f, 0.4f, 0.7f), stamp = 0))), listOf(sig))
+            val b = page(out)
+            (Color.red(b.at(0.25f, 0.65f)) < 60 && white(b.at(0.25f, 0.605f))) to "ink black, transparent parts stay white"
+        }
+        check("Devanagari text box renders") {
+            val (stamp, wPt, hPt) = renderTextStamp("नमस्ते दुनिया", 18f, Color.BLACK, dir)
+            val out = edited("hindi", plain, EditSpec(listOf(EditSpec.Mark(0, EditSpec.Kind.IMAGE, listOf(0.1f, 0.6f, 0.1f + wPt / 595f, 0.6f + hPt / 842f), stamp = 0))), listOf(stamp))
+            val n = dark(page(out), 0.1f, 0.6f, 0.1f + wPt / 595f, 0.6f + hPt / 842f)
+            (n > 50) to "$n dark pixels where it was placed; check the shaping by eye in the editor"
+        }
+        check("Form fill: Latin value as text, Devanagari value stamped") {
+            val form = File(dir, "form.pdf").also { pdf.makeTestPdf("form", "", it) }
+            val (fields, _) = pdf.formFields(form)
+            val city = fields.first { it.name == "city" }
+            val stamp = renderFieldStamp("पुणे", city.widthPt, city.heightPt, dir)
+            val out = edited("filled", form, EditSpec(fields = mapOf("name" to "Aditya"), stampedFields = mapOf("city" to 0)), listOf(stamp))
+            val (after, _) = pdf.formFields(out)
+            // city: rect (60, 640, 300 × 30) on an A4 page; v runs from the top.
+            val n = dark(page(out), 60 / 595f, (842 - 670) / 842f, 360 / 595f, (842 - 640) / 842f)
+            (fields.map { it.name } == listOf("name", "city") && after.singleOrNull()?.value == "Aditya" && n > 20) to
+                "fields ${fields.map { it.name }} → ${after.map { "${it.name}=${it.value}" }}, city stamped ($n dark pixels)"
+        }
+        check("XFA form shows a clean error") {
+            val form = File(dir, "xfa.pdf").also { pdf.makeTestPdf("xfa", "", it) }
+            val (_, xfa) = pdf.formFields(form)
+            val message = try {
+                edited("xfa-filled", form, EditSpec(fields = mapOf("name" to "x")))
+                "saved (should not have)"
+            } catch (e: ParserFailure) {
+                e.message.orEmpty()
+            }
+            (xfa && "XFA" in message) to message
+        }
+        check("S13: redaction leaves no trace of the hidden text") {
+            val phrase = "FFRedact" + Random.nextInt(100_000, 999_999)
+            val source = File(dir, "secret.pdf").also { pdf.makeTestPdf("redaction", phrase, it) }
+            val before = occurrences(source.readBytes(), phrase)
+            val spec = File(dir, "redact.json").apply { writeText(EditSpec(listOf(EditSpec.Mark(0, EditSpec.Kind.REDACT, listOf(0f, 0f, 1f, 1f)))).toJson()) }
+            val out = File(dir, "redacted.pdf").also { pdf.redact(source, spec, it) }
+            val bytes = out.readBytes()
+            val after = occurrences(bytes, phrase)
+            val kept = occurrences(bytes, "Keep this page") > 0
+            (before >= 5 && after == 0 && kept && pdf.pageCount(out) == 2) to
+                "phrase in the test file $before times (page, info, XMP, bookmark, attachment, note) → $after after; unmarked page kept its text: $kept"
+        }
+    }
+
+    /** Counts [text] as ASCII and as UTF-16BE, the two ways a PDF string can hold it uncompressed. */
+    private fun occurrences(bytes: ByteArray, text: String): Int =
+        listOf(text.toByteArray(Charsets.US_ASCII), text.toByteArray(Charsets.UTF_16BE)).sumOf { needle ->
+            var n = 0
+            var from = 0
+            while (true) {
+                val i = indexOf(bytes, needle, from)
+                if (i < 0) break
+                n++
+                from = i + 1
+            }
+            n
+        }
+
     /** One reported check; an exception fails this check only, with its message. */
     private suspend fun check(name: String, block: suspend () -> Pair<Boolean, String>) {
         try {
@@ -542,8 +651,8 @@ class SelfTest(
         error("job did not finish in 2 minutes")
     }
 
-    private fun indexOf(haystack: ByteArray, needle: ByteArray): Int {
-        outer@ for (i in 0..haystack.size - needle.size) {
+    private fun indexOf(haystack: ByteArray, needle: ByteArray, from: Int = 0): Int {
+        outer@ for (i in from..haystack.size - needle.size) {
             for (j in needle.indices) if (haystack[i + j] != needle[j]) continue@outer
             return i
         }
@@ -660,7 +769,7 @@ class SelfTest(
         const val PHOTOS = 100
         const val SPEED_RUNS = 3
         /** Checks in the PDF sections, not counting the PDF fuzz pass. */
-        const val PDF_TICKS = 4 + 3 + 4 + 2 + 2 + 7
+        const val PDF_TICKS = 4 + 3 + 4 + 2 + 2 + 7 + 7
     }
 
     private fun describe(o: Outcome) = when (o) {

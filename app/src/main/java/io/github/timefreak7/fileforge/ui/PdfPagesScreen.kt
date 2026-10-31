@@ -1,6 +1,5 @@
 package io.github.timefreak7.fileforge.ui
 
-import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -56,14 +55,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.timefreak7.fileforge.core.Format
-import io.github.timefreak7.fileforge.core.Limits
 import io.github.timefreak7.fileforge.image.ParserFailure
 import io.github.timefreak7.fileforge.jobs.AppSettings
 import io.github.timefreak7.fileforge.jobs.IncomingFile
 import io.github.timefreak7.fileforge.jobs.JobQueue
 import io.github.timefreak7.fileforge.pdf.PageRef
 import io.github.timefreak7.fileforge.pdf.PdfEngineClient
-import io.github.timefreak7.fileforge.pdf.PdfEngineClient.Companion.isPassword
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -71,13 +68,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.UUID
 
-/** A PDF the organiser has loaded: a private copy, so thumbnails and the job never depend on a share grant. */
-private data class LoadedPdf(val name: String, val file: File, val pages: Int, val password: String? = null)
-
-/** An open password prompt; [answer] completes with (password, save without password) or null for Cancel. */
-private class PasswordAsk(val request: PasswordRequest, val answer: CompletableDeferred<Pair<String, Boolean>?>)
 
 /** One page tile; [key] keeps selection attached to the page while pages move. */
 private data class PageItem(val key: Int, val ref: PageRef)
@@ -120,26 +111,11 @@ fun PdfPagesScreen(start: List<IncomingFile>, onQueued: (String) -> Unit, onClos
             val errors = mutableListOf<String>()
             for (f in files) {
                 try {
-                    val dest = copyPdf(context, f, dir)
-                    var password: String? = null
-                    var pages: Int? = null
-                    while (pages == null) {
-                        try {
-                            pages = engine.pageCount(dest, password)
-                        } catch (e: ParserFailure) {
-                            if (!e.isPassword) throw e
-                            val answer = askPassword(PasswordRequest(f.name, e.message.takeIf { e.code == PdfEngineClient.WRONG_PASSWORD })) ?: break
-                            password = answer.first
-                            if (answer.second) removePassword = true
-                        }
-                    }
-                    if (pages == null) {
-                        dest.delete() // cancelled at the password prompt
-                        continue
-                    }
+                    val loaded = loadPdf(context, engine, f, dir, ::askPassword) ?: continue
+                    if (loaded.removePassword) removePassword = true
                     val input = pdfs.size
-                    pdfs += LoadedPdf(f.name.take(200), dest, pages, password)
-                    repeat(pages) { items += PageItem(nextKey++, PageRef(input, it)) }
+                    pdfs += loaded
+                    repeat(loaded.pages) { items += PageItem(nextKey++, PageRef(input, it)) }
                 } catch (e: ParserFailure) {
                     errors += "${f.name}: ${e.message}"
                 }
@@ -282,36 +258,6 @@ private fun PageTile(
     }
 }
 
-/** Copies one PDF into [dir] and checks its header. Throws [ParserFailure]. */
-private suspend fun copyPdf(context: Context, file: IncomingFile, dir: File): File {
-    val dest = File(dir, UUID.randomUUID().toString())
-    withContext(Dispatchers.IO) {
-        try {
-            val tooBig = context.contentResolver.openInputStream(file.uri)!!.use { input ->
-                dest.outputStream().use { out ->
-                    val buffer = ByteArray(64 * 1024)
-                    var total = 0L
-                    while (true) {
-                        val n = input.read(buffer)
-                        if (n < 0) break
-                        total += n
-                        if (total > Limits.MAX_PDF_BYTES) return@use true
-                        out.write(buffer, 0, n)
-                    }
-                    false
-                }
-            }
-            if (tooBig) throw ParserFailure("This file is larger than ${Limits.MAX_PDF_BYTES / (1024 * 1024)} MB.")
-        } catch (e: ParserFailure) {
-            throw e
-        } catch (e: Exception) {
-            throw ParserFailure("This file could not be read. If it was shared from another app, share it again.")
-        }
-        val header = dest.inputStream().use { it.readNBytes(5) }
-        if (!header.contentEquals("%PDF-".toByteArray())) throw ParserFailure("This is not a PDF.")
-    }
-    return dest
-}
 
 /** Moves every selected page one step, keeping selected neighbours together. */
 private fun move(items: MutableList<PageItem>, selected: Set<Int>, earlier: Boolean) {

@@ -5,8 +5,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.FilledTonalButton
@@ -64,8 +66,8 @@ fun DonutOverlay(
     onDismiss: () -> Unit,
     /** What each segment does to this selection ("Compress", "JPG pages"); defaults to the format name. */
     label: (Format) -> String = { it.label },
-    /** Shown as a button under the ring when the selection is all PDFs: opens the page organiser. */
-    onEditPages: (() -> Unit)? = null,
+    /** Buttons beside the ring for what is not a conversion (PDFs: "Edit pages", "Sign & mark up"). */
+    actions: List<Pair<String, () -> Unit>> = emptyList(),
 ) {
     val density = LocalDensity.current
     val view = LocalView.current
@@ -167,12 +169,14 @@ fun DonutOverlay(
                 color = colors.onSurface,
                 modifier = Modifier.centeredAt(c),
             )
-            if (onEditPages != null) {
+            if (actions.isNotEmpty()) {
                 // Above the ring (the ring usually opens low, over Recents), below it when there is no room above.
                 val gap = with(density) { 44.dp.toPx() }
                 val y = if (c.y - outer - gap * 1.5f > 0) c.y - outer - gap else c.y + outer + gap
-                FilledTonalButton(onClick = onEditPages, modifier = Modifier.centeredAt(Offset(c.x, y)).heightIn(min = 48.dp)) {
-                    Text("Edit pages")
+                Row(Modifier.centeredAt(Offset(width / 2, y)), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    actions.forEach { (label, action) ->
+                        FilledTonalButton(onClick = action, modifier = Modifier.heightIn(min = 48.dp)) { Text(label) }
+                    }
                 }
             }
         }

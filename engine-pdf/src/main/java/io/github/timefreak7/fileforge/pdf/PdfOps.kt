@@ -24,6 +24,7 @@ import com.tom_roush.pdfbox.pdmodel.encryption.StandardProtectionPolicy
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import io.github.timefreak7.fileforge.core.Limits
+import io.github.timefreak7.fileforge.core.PageGeometry
 import io.github.timefreak7.fileforge.core.PageSize
 import io.github.timefreak7.fileforge.image.ConversionException
 import io.github.timefreak7.fileforge.image.ImageConverter
@@ -39,12 +40,12 @@ import kotlin.math.roundToInt
 /** The PDF operations. Everything except [imagesToPdf] runs in the isolated process on untrusted PDFs. */
 object PdfOps {
 
-    private fun passwordFailure(password: String) =
+    internal fun passwordFailure(password: String) =
         if (password.isEmpty()) ConversionException(PdfEngineClient.PASSWORD_NEEDED_MESSAGE, PdfEngineClient.PASSWORD_NEEDED)
         else ConversionException("That password is not right. Check it and try again.", PdfEngineClient.WRONG_PASSWORD)
 
     /** Opens a PDF read straight from its descriptor; no temp files, no full copy in memory. */
-    private fun open(pdf: ParcelFileDescriptor, password: String): PDDocument {
+    internal fun open(pdf: ParcelFileDescriptor, password: String): PDDocument {
         val doc = try {
             val parser = PDFParser(FdRandomAccess(FileInputStream(pdf.fileDescriptor).channel), password, ScratchFile.getMainMemoryOnlyInstance())
             parser.parse()
@@ -71,16 +72,22 @@ object PdfOps {
      * S14: protects [doc] with [userPassword] (AES-256). The owner password is random, so the input's
      * restrictions ([permissions]) cannot be lifted with the open password.
      */
-    private fun protect(doc: PDDocument, userPassword: String, permissions: AccessPermission) {
+    internal fun protect(doc: PDDocument, userPassword: String, permissions: AccessPermission) {
         val owner = ByteArray(24).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
         doc.protect(StandardProtectionPolicy(owner, userPassword, permissions).apply { encryptionKeyLength = 256 })
     }
 
-    private fun AccessPermission.copy() = AccessPermission(permissionBytes)
+    /** For a document saved in place: re-protect explicitly rather than rely on PDFBox re-saving the loaded encryption. */
+    internal fun keepOrRemovePassword(doc: PDDocument, password: String, removePassword: Boolean) {
+        if (!doc.isEncrypted) return
+        if (removePassword) doc.isAllSecurityToBeRemoved = true else protect(doc, password, doc.currentAccessPermission.copy())
+    }
+
+    internal fun AccessPermission.copy() = AccessPermission(permissionBytes)
 
     private fun out(pdf: ParcelFileDescriptor) = BufferedOutputStream(FileOutputStream(pdf.fileDescriptor), 64 * 1024)
 
-    private fun save(doc: PDDocument, output: ParcelFileDescriptor) {
+    internal fun save(doc: PDDocument, output: ParcelFileDescriptor) {
         try {
             out(output).let {
                 doc.save(it)
@@ -93,16 +100,26 @@ object PdfOps {
 
     fun info(pdf: ParcelFileDescriptor, password: String): Int = open(pdf, password).use { it.numberOfPages }
 
+    /** Each page's size as shown (rotation applied), in points: width, height, width, height, ... */
+    fun pageSizes(pdf: ParcelFileDescriptor, password: String): FloatArray = open(pdf, password).use { doc ->
+        doc.pages.flatMap { p ->
+            val (w, h) = PageGeometry.displaySize(p.cropBox.width, p.cropBox.height, p.rotation)
+            listOf(w, h)
+        }.toFloatArray()
+    }
+
     /** Renders with Android's own PDF renderer; pixels go back through shared memory. */
+    /** Android's renderer; it takes ownership of [pdf] and closes it. */
+    internal fun renderer(pdf: ParcelFileDescriptor, password: String): PdfRenderer = try {
+        if (password.isEmpty()) PdfRenderer(pdf) else PdfRenderer(pdf, LoadParams.Builder().setPassword(password).build())
+    } catch (e: SecurityException) {
+        throw passwordFailure(password)
+    } catch (e: Exception) {
+        throw ConversionException("This file is damaged or is not a PDF FileForge can read.")
+    }
+
     fun renderPage(pdf: ParcelFileDescriptor, password: String, index: Int, dpi: Int, widthPx: Int): Bundle {
-        val renderer = try {
-            if (password.isEmpty()) PdfRenderer(pdf) else PdfRenderer(pdf, LoadParams.Builder().setPassword(password).build())
-        } catch (e: SecurityException) {
-            throw passwordFailure(password)
-        } catch (e: Exception) {
-            throw ConversionException("This file is damaged or is not a PDF FileForge can read.")
-        }
-        renderer.use { r ->
+        renderer(pdf, password).use { r ->
             if (index !in 0 until r.pageCount) throw ConversionException("This PDF has no page ${index + 1}.")
             r.openPage(index).use { page ->
                 var w = if (widthPx > 0) widthPx else (page.width * dpi / 72f).roundToInt()
@@ -184,10 +201,7 @@ object PdfOps {
                     }
                 }
             }
-            // Re-protect explicitly rather than rely on PDFBox re-saving the loaded encryption.
-            if (doc.isEncrypted) {
-                if (removePassword) doc.isAllSecurityToBeRemoved = true else protect(doc, password, doc.currentAccessPermission.copy())
-            }
+            keepOrRemovePassword(doc, password, removePassword)
             save(doc, output)
             return replaced
         }

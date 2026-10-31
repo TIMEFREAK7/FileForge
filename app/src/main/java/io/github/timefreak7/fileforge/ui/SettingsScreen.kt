@@ -49,6 +49,7 @@ fun SettingsScreen(
     contentPadding: PaddingValues,
     onChooseFolder: () -> Unit,
     onSelfTest: (() -> Unit)?,
+    onSignatures: () -> Unit,
 ) {
     val context = LocalContext.current
     var keepMetadata by remember { mutableStateOf(settings.keepMetadata) }
@@ -139,6 +140,10 @@ fun SettingsScreen(
                 ) { Text("Down") }
             }
         }
+
+        HorizontalDivider()
+        Section("Signatures")
+        OutlinedButton(onClick = onSignatures, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Manage signatures") }
 
         HorizontalDivider()
         Section("About")

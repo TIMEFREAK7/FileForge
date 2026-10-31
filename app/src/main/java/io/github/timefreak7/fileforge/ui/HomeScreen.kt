@@ -62,6 +62,7 @@ fun HomeScreen(
     contentPadding: PaddingValues,
     onPickFiles: () -> Unit,
     onEditPdf: () -> Unit,
+    onMarkUpPdf: () -> Unit,
     drag: DonutDrag,
 ) {
     val context = LocalContext.current
@@ -91,6 +92,14 @@ fun HomeScreen(
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Edit PDF pages", style = MaterialTheme.typography.titleMedium)
                     Text("Rotate, delete, reorder, join or split", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        item {
+            OutlinedButton(onClick = onMarkUpPdf, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Sign & mark up a PDF", style = MaterialTheme.typography.titleMedium)
+                    Text("Sign, fill forms, write, highlight or hide", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

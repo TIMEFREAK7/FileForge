@@ -55,6 +55,34 @@ abstract class PdfEngineService : Service() {
             }
 
         override fun jpegProbe() = safely { putAll(PdfOps.jpegProbe()) }
+
+        override fun pageSizes(pdf: ParcelFileDescriptor, password: String?) =
+            safely(pdf) { putFloatArray("sizes", PdfOps.pageSizes(pdf, password.orEmpty())) }
+
+        override fun formFields(pdf: ParcelFileDescriptor, password: String?) = safely(pdf) {
+            val (json, xfa) = PdfEdit.formFields(pdf, password.orEmpty())
+            putString("fields", json)
+            putBoolean("xfa", xfa)
+        }
+
+        override fun edit(
+            input: ParcelFileDescriptor,
+            password: String?,
+            spec: ParcelFileDescriptor,
+            stamps: Array<ParcelFileDescriptor>,
+            output: ParcelFileDescriptor,
+            removePassword: Boolean,
+        ) = safely(input, spec, *stamps, output) {
+            putInt("pages", PdfEdit.edit(input, password.orEmpty(), spec, stamps, output, removePassword))
+        }
+
+        override fun redact(input: ParcelFileDescriptor, password: String?, spec: ParcelFileDescriptor, output: ParcelFileDescriptor, removePassword: Boolean) =
+            safely(input, spec, output) { putInt("pages", PdfEdit.redact(input, password.orEmpty(), spec, output, removePassword)) }
+
+        override fun makeTestPdf(kind: String, phrase: String, output: ParcelFileDescriptor) = safely(output) {
+            if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) throw ConversionException("Not available.")
+            PdfEdit.makeTestPdf(kind, phrase, output)
+        }
     }
 
     /** Runs one call, turns any failure into a plain-language "error", and always closes the descriptors. */

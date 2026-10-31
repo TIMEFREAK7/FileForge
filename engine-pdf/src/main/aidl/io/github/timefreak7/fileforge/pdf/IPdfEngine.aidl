@@ -31,6 +31,23 @@ interface IPdfEngine {
     /** One page per JPEG (encoded by FileForge, never user files). [pageSize] is a PageSize name. */
     Bundle imagesToPdf(in ParcelFileDescriptor[] jpegs, in ParcelFileDescriptor output, String pageSize);
 
+    /** Each page's size as shown, in points: "sizes" (float[] of width, height pairs). */
+    Bundle pageSizes(in ParcelFileDescriptor pdf, String password);
+
+    /** "fields" (JSON, see FormField) and "xfa" (boolean: an XFA form, which cannot be filled). */
+    Bundle formFields(in ParcelFileDescriptor pdf, String password);
+
+    /** Applies an EditSpec read from [spec]: marks, PNG [stamps] and form values. "pages" (int). */
+    Bundle edit(in ParcelFileDescriptor input, String password, in ParcelFileDescriptor spec, in ParcelFileDescriptor[] stamps,
+            in ParcelFileDescriptor output, boolean removePassword);
+
+    /** Rasterises the pages with REDACT marks in [spec] and drops everything but page content (S13). "pages" (int). */
+    Bundle redact(in ParcelFileDescriptor input, String password, in ParcelFileDescriptor spec, in ParcelFileDescriptor output,
+            boolean removePassword);
+
+    /** Debug builds only: writes a self-test PDF ("redaction", "form" or "xfa") containing [phrase]. */
+    Bundle makeTestPdf(String kind, String phrase, in ParcelFileDescriptor output);
+
     /** Self-test diagnostic: ms to JPEG-encode a 12 MP bitmap with Bitmap.compress and with YuvImage. */
     Bundle jpegProbe();
 }

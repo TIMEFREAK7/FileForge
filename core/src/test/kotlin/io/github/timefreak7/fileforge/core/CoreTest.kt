@@ -105,3 +105,27 @@ class LimitsTest {
         Preset(quality = 0)
     }
 }
+
+class PageGeometryTest {
+    private fun map(m: FloatArray, x: Float, y: Float) = (m[0] * x + m[2] * y + m[4]) to (m[1] * x + m[3] * y + m[5])
+
+    /** The display corner shown top-left must be the user-space corner that a clockwise /Rotate brings there. */
+    @Test fun topLeftCornerFollowsClockwiseRotation() {
+        val (x0, y0, w, h) = listOf(10f, 20f, 600f, 800f)
+        val expected = mapOf(
+            0 to (x0 to y0 + h), // unrotated: top-left
+            90 to (x0 to y0), // bottom-left turns to top-left
+            180 to (x0 + w to y0), // bottom-right
+            270 to (x0 + w to y0 + h), // top-right
+        )
+        for ((rotation, corner) in expected) {
+            val (dw, dh) = PageGeometry.displaySize(w, h, rotation)
+            assertEquals("rotation $rotation", corner, map(PageGeometry.displayToUser(x0, y0, w, h, rotation), 0f, dh))
+            // The opposite display corner lands on the opposite user corner.
+            val (bx, by) = map(PageGeometry.displayToUser(x0, y0, w, h, rotation), dw, 0f)
+            assertEquals(x0 + x0 + w, corner.first + bx, 0.001f)
+            assertEquals(y0 + y0 + h, corner.second + by, 0.001f)
+        }
+        assertEquals(800f to 600f, PageGeometry.displaySize(600f, 800f, -90))
+    }
+}

@@ -23,6 +23,8 @@ enum class JobOp {
     ASSEMBLE_PDF,
     /** The organiser's page groups, one PDF each. */
     SPLIT_PDF,
+    /** The editor's marks, signatures, form values and hidden areas (spec and stamps kept beside the input). */
+    EDIT_PDF,
 }
 
 /** One input of a job. Its bytes live at `jobs/<id>/in/<index>` until the job is finished with it. */
