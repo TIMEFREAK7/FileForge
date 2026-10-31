@@ -27,16 +27,17 @@ class PdfEngineClient(context: Context) : Closeable {
 
     private fun timeout(pages: Int, vararg files: File) = Limits.pdfTimeoutMs(pages, files.sumOf { it.length() })
 
-    suspend fun pageCount(pdf: File): Int =
-        calls.call(isolated, timeout(0, pdf), false, readOnly(pdf)) { e, (p) -> e.info(p) }.getInt("pages")
+    /** Passwords below are null when none; a protected PDF without one fails with [PASSWORD_NEEDED]. */
+    suspend fun pageCount(pdf: File, password: String? = null): Int =
+        calls.call(isolated, timeout(0, pdf), false, readOnly(pdf)) { e, (p) -> e.info(p, password.orEmpty()) }.getInt("pages")
 
     /** Rendered page pixels for the image encoder; the caller closes the bundle's shared memory. */
-    suspend fun renderPixels(pdf: File, page: Int, dpi: Int, widthPx: Int = 0): Bundle =
-        calls.call(isolated, timeout(1, pdf), false, readOnly(pdf)) { e, (p) -> e.renderPage(p, page, dpi, widthPx) }
+    suspend fun renderPixels(pdf: File, page: Int, dpi: Int, widthPx: Int = 0, password: String? = null): Bundle =
+        calls.call(isolated, timeout(1, pdf), false, readOnly(pdf)) { e, (p) -> e.renderPage(p, password.orEmpty(), page, dpi, widthPx) }
 
     /** A thumbnail or preview, rebuilt in this process from the isolated renderer's raw pixels. */
-    suspend fun renderBitmap(pdf: File, page: Int, widthPx: Int): Bitmap {
-        val pixels = renderPixels(pdf, page, 72, widthPx)
+    suspend fun renderBitmap(pdf: File, page: Int, widthPx: Int, password: String? = null): Bitmap {
+        val pixels = renderPixels(pdf, page, 72, widthPx, password)
         try {
             return ImageConverter.fromPixels(pixels)
         } finally {
@@ -44,19 +45,30 @@ class PdfEngineClient(context: Context) : Closeable {
         }
     }
 
-    /** Merge, split, extract, delete, reorder and rotate are all one call: the pages to keep, in order. */
-    suspend fun assemble(inputs: List<File>, pages: List<PageRef>, output: File): Int {
+    /**
+     * Merge, split, extract, delete, reorder and rotate are all one call: the pages to keep, in order.
+     * The output keeps the first protected input's password unless [removePassword]; [newPassword] sets one.
+     */
+    suspend fun assemble(
+        inputs: List<File>,
+        pages: List<PageRef>,
+        output: File,
+        passwords: List<String?> = emptyList(),
+        removePassword: Boolean = false,
+        newPassword: String? = null,
+    ): Int {
         val spec = pages.flatMap { listOf(it.input, it.page, it.rotation) }.toIntArray()
+        val pw = Array(inputs.size) { passwords.getOrNull(it).orEmpty() }
         val fds = inputs.map { readOnly(it) } + writable(output)
         return calls.call(isolated, timeout(pages.size, *inputs.toTypedArray()), false, *fds.toTypedArray()) { e, all ->
-            e.assemble(all.dropLast(1).toTypedArray(), spec, all.last())
+            e.assemble(all.dropLast(1).toTypedArray(), pw, spec, all.last(), removePassword, newPassword.orEmpty())
         }.getInt("pages")
     }
 
-    /** Returns how many embedded images were replaced by smaller JPEGs. */
-    suspend fun compress(input: File, output: File, quality: Int, dpi: Int, pages: Int): Int =
+    /** Returns how many embedded images were replaced by smaller JPEGs. A protected input stays protected unless [removePassword]. */
+    suspend fun compress(input: File, output: File, quality: Int, dpi: Int, pages: Int, password: String? = null, removePassword: Boolean = false): Int =
         calls.call(isolated, timeout(pages, input), false, readOnly(input), writable(output)) { e, (i, o) ->
-            e.compress(i, o, quality, dpi)
+            e.compress(i, password.orEmpty(), o, quality, dpi, removePassword)
         }.getInt("replaced")
 
     /** [jpegs] must be JPEGs FileForge encoded itself. */
@@ -72,4 +84,15 @@ class PdfEngineClient(context: Context) : Closeable {
         calls.call(isolated, 60_000, false) { e, _ -> e.jpegProbe() }.let { it.getLong("bitmapCompressMs") to it.getLong("yuvImageMs") }
 
     override fun close() = calls.close()
+
+    companion object {
+        /** [ParserFailure.code]: the PDF is protected and no password was given. */
+        const val PASSWORD_NEEDED = "password"
+        /** [ParserFailure.code]: the password given does not open the PDF. */
+        const val WRONG_PASSWORD = "wrongPassword"
+        /** The [PASSWORD_NEEDED] message; a prompt shows any other password message (a wrong one) as an error. */
+        const val PASSWORD_NEEDED_MESSAGE = "This PDF is protected. Enter its password to continue."
+
+        val ParserFailure.isPassword: Boolean get() = code == PASSWORD_NEEDED || code == WRONG_PASSWORD
+    }
 }

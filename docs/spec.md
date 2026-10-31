@@ -58,7 +58,7 @@ v1 is everything that converts well offline with Android's own APIs or small lib
 | Annotate PDF | v1 | Pen, highlight, text box, shapes. Latin-script text is written as PDF text; Devanagari and other complex scripts are laid out by Android's text engine and stamped as an image, because PDFBox does no script shaping (that text is not selectable) |
 | Fill PDF forms | v1 | Existing AcroForm fields only; XFA forms are not supported and show a plain error. Values in complex scripts are flattened as a stamped image, so that field is no longer editable |
 | Redact PDF | v1 | Redacted pages are rasterised so hidden text is removed, not just covered. The output is always a full save (never incremental), with document info, XMP metadata, attachments and bookmarks stripped |
-| Password-protected PDFs | v1 | The password is asked for each job. Outputs stay protected with the same password by default; the options sheet offers "Remove password" |
+| Password-protected PDFs | v1 | The password is asked for each job, in a prompt that opens when the job finds a protected file (and in the organiser when the file is added). Outputs stay protected with the same password by default (AES-256; the owner password is random, so the input's restrictions carry over); the prompt offers "Save without a password". PDF → images warns that images cannot have a password |
 | Video → MP4 (H.264/HEVC), resize, trim | v1 | Hardware encoders only |
 | Video → audio, audio → MP3, M4A (AAC) or WAV | v1 | MP3 through a bundled LAME encoder; M4A through the platform encoder |
 | PDF → Word (DOCX) | v2 | pdf2docx via Chaquopy, after the Phase 0 spike passes |
@@ -102,7 +102,7 @@ Nine screens, one activity, built in Jetpack Compose.
 | Home | Recents, a Pick files button (images and PDFs, which open the donut: merge, compress and PDF → images are donut segments), and an Edit PDF pages button for the organiser |
 | Folders | Browse folders the user granted (via the system folder picker); long-press opens the donut |
 | Donut overlay | The radial menu described above |
-| Options sheet | Per-format preset: quality, size, DPI, page range, file name, remove password |
+| Options sheet | Per-format preset: quality, size, DPI, page size, file name ("Save without a password" lives in the password prompt, where it applies) |
 | Jobs | Queue with progress, cancel, retry, and the error in plain words when one fails |
 | PDF organiser | Page thumbnails to merge (Add PDF), split before selected pages, extract, reorder, rotate, delete |
 | PDF editor | Viewer with pen, highlight, text box, shapes, signature, form fill, redact |
@@ -170,7 +170,7 @@ Every check below is a release blocker: a failed check means no APK ships. Autom
 | S11 | Dependencies pinned and verified: Gradle dependency verification (sha256), per-module lockfiles, and an OSV scan with zero high or critical findings in anything that ships in the APK. Findings in build-only tooling are listed but do not block | CI step (`scripts/osv_scan.py`) | Automated |
 | S12 | MobSF static scan of the release APK: zero high findings | Run before each release | Manual |
 | S13 | Redaction removes content: after redacting, the hidden text cannot be found by text search, copied, or recovered from an earlier revision, metadata, bookmarks or attachments | Test with a known phrase placed on the page, in document info, XMP, a bookmark title and an attachment; the output is searched byte-for-byte and must not contain it | Automated |
-| S14 | PDF passwords are used once and never saved; a protected input never yields an unprotected output unless the user chose "Remove password" | Code review plus a test that scans app storage after a job, and a test that a protected input's output still asks for the password | Automated |
+| S14 | PDF passwords are held only in memory for their job (never in job records, the WorkManager database or logs) and forgotten when it ends or the app process stops; a protected input never yields an unprotected PDF unless the user chose "Save without a password" (PDF → images says images cannot carry one) | Code review plus an on-phone self-test that runs real merge jobs on a protected PDF, checks the output still asks for the password, then scans all app storage for it | Self-test |
 | S15 | Release signing key kept offline with a second backup; SHA-256 of every APK published in the GitHub release | Release checklist | Manual |
 | S16 | No signing material in the public repository: keystore, keystore.properties and passwords are git-ignored; APKs are signed locally | .gitignore plus a gitleaks secret scan on every push | Automated |
 

@@ -11,6 +11,7 @@ import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
+import android.provider.DocumentsContract
 import androidx.exifinterface.media.ExifInterface
 import androidx.heifwriter.HeifWriter
 import io.github.timefreak7.fileforge.core.FileNames
@@ -23,6 +24,10 @@ import io.github.timefreak7.fileforge.image.ImageEngineClient
 import io.github.timefreak7.fileforge.image.ImageEngineClient.Outcome
 import io.github.timefreak7.fileforge.image.ParserFailure
 import io.github.timefreak7.fileforge.jobs.AppSettings
+import io.github.timefreak7.fileforge.jobs.IncomingFile
+import io.github.timefreak7.fileforge.jobs.JobQueue
+import io.github.timefreak7.fileforge.jobs.JobRecord
+import io.github.timefreak7.fileforge.jobs.JobStore
 import io.github.timefreak7.fileforge.pdf.PageRef
 import io.github.timefreak7.fileforge.pdf.PdfEngineClient
 import java.io.File
@@ -65,6 +70,7 @@ class SelfTest(
             section("300-page PDF") { bigPdf(pdf) }
             section("PDF compression") { compression(pdf) }
             section("PDF fuzz pass") { fuzzPdf(pdf, fuzzPerFormat) }
+            section("Protected PDFs") { passwords(pdf) }
         } }
         section("Security checks") { securityChecks() }
         dir.deleteRecursively()
@@ -432,6 +438,102 @@ class SelfTest(
         report(true, "Fuzz PDF × $count: app survived. $opened went through all three readers, $rejected rejected cleanly, $crashed crashed a reader (recovered), $timedOut timed out")
     }
 
+    /**
+     * Phase 2 gate and S14: protected PDFs through the engine, then through real jobs the way the app runs
+     * them (asked, wrong password, right password), then a scan of all app storage for the password.
+     * The jobs write to the output folder; their outputs are deleted afterwards.
+     */
+    private suspend fun passwords(pdf: PdfEngineClient) {
+        val secret = "ffT-" + java.util.UUID.randomUUID().toString().take(12)
+        val plain = makePdf(3, "plain") { Color.WHITE }
+        val locked = File(dir, "locked.pdf")
+        pdf.assemble(listOf(plain), List(3) { PageRef(0, it) }, locked, newPassword = secret)
+        val asked = failureCode { pdf.pageCount(locked) }
+        val wrong = failureCode { pdf.pageCount(locked, "not-it") }
+        report(
+            asked == PdfEngineClient.PASSWORD_NEEDED && wrong == PdfEngineClient.WRONG_PASSWORD && pdf.pageCount(locked, secret) == 3,
+            "Protected PDF: no password → asks ($asked), wrong → \"wrong\" ($wrong), right → opens",
+        )
+        tick()
+        val page = pdf.renderBitmap(locked, 0, 200, secret)
+        report(page.width == 200, "Protected PDF renders with its password (Android's PDF renderer)")
+        tick()
+        val kept = File(dir, "kept.pdf")
+        val removed = File(dir, "removed.pdf")
+        pdf.compress(locked, kept, 70, 72, 3, secret)
+        pdf.compress(locked, removed, 70, 72, 3, secret, removePassword = true)
+        report(
+            failureCode { pdf.pageCount(kept) } == PdfEngineClient.PASSWORD_NEEDED && pdf.pageCount(removed) == 3,
+            "Compress keeps the password; \"Save without a password\" removes it",
+        )
+        tick()
+
+        val files = listOf(IncomingFile(Uri.fromFile(locked), "locked.pdf", Format.PDF), IncomingFile(Uri.fromFile(plain), "plain.pdf", Format.PDF))
+        suspend fun mergeJob(removePassword: Boolean): Pair<File?, String> {
+            val id = JobQueue.enqueue(context, files, Format.PDF, Preset())
+            var job = waitForJob(id)
+            val askedFirst = job.inputs[0].needsPassword
+            JobQueue.retry(context, id, mapOf(0 to "not-it"))
+            job = waitForJob(id)
+            val wrongAgain = job.inputs[0].needsPassword && job.inputs[0].error != PdfEngineClient.PASSWORD_NEEDED_MESSAGE
+            JobQueue.retry(context, id, mapOf(0 to secret), removePassword)
+            job = waitForJob(id)
+            val out = job.outputs.firstOrNull()?.let { output ->
+                File(dir, "job-out.pdf").also { f ->
+                    context.contentResolver.openInputStream(Uri.parse(output.uri))!!.use { input -> f.outputStream().use { input.copyTo(it) } }
+                    runCatching { DocumentsContract.deleteDocument(context.contentResolver, Uri.parse(output.uri)) }
+                }
+            }
+            JobQueue.dismiss(context, id)
+            return out to "asked $askedFirst, wrong password caught $wrongAgain, saved ${out != null}"
+        }
+        val (merged, steps) = mergeJob(removePassword = false)
+        report(
+            merged != null && failureCode { pdf.pageCount(merged) } == PdfEngineClient.PASSWORD_NEEDED && pdf.pageCount(merged, secret) == 6,
+            "Gate: merging a protected PDF (as a real job) gives a protected output: $steps",
+        )
+        tick()
+        val (open, steps2) = mergeJob(removePassword = true)
+        report(open != null && pdf.pageCount(open) == 6, "Merge with \"Save without a password\" gives an open PDF: $steps2")
+        tick()
+
+        // S14: the password must not be anywhere in app storage (job files, WorkManager database, settings, cache).
+        val needles = listOf(secret.toByteArray(Charsets.UTF_8), secret.toByteArray(Charsets.UTF_16LE))
+        val found = context.dataDir.walkTopDown()
+            .filter { it.isFile && it.length() < 50L * 1024 * 1024 }
+            .filter { f -> runCatching { f.readBytes() }.getOrNull()?.let { bytes -> needles.any { indexOf(bytes, it) >= 0 } } == true }
+            .map { it.relativeTo(context.dataDir).path }
+            .toList()
+        report(found.isEmpty(), "S14: password found in app storage: ${if (found.isEmpty()) "nowhere" else found.joinToString()}")
+        tick()
+    }
+
+    private suspend fun failureCode(block: suspend () -> Unit): String? = try {
+        block()
+        null
+    } catch (e: ParserFailure) {
+        e.code
+    }
+
+    /** Waits until every input of job [id] is done or failed; 2 minutes at most. */
+    private suspend fun waitForJob(id: String): JobRecord {
+        val store = JobStore(context)
+        repeat(400) {
+            kotlinx.coroutines.delay(300)
+            val job = store.load(id)
+            if (job != null && job.inputs.all { it.done || it.error != null }) return job
+        }
+        error("job did not finish in 2 minutes")
+    }
+
+    private fun indexOf(haystack: ByteArray, needle: ByteArray): Int {
+        outer@ for (i in 0..haystack.size - needle.size) {
+            for (j in needle.indices) if (haystack[i + j] != needle[j]) continue@outer
+            return i
+        }
+        return -1
+    }
+
     /** A test PDF made by Android's own PDF writer, so FileForge's readers see a file it did not write. */
     private fun makePdf(pages: Int, name: String, background: (Int) -> Int): File {
         val doc = PdfDocument()
@@ -542,7 +644,7 @@ class SelfTest(
         const val PHOTOS = 100
         const val SPEED_RUNS = 3
         /** Checks in the PDF sections, not counting the PDF fuzz pass. */
-        const val PDF_TICKS = 4 + 3 + 4 + 2 + 2
+        const val PDF_TICKS = 4 + 3 + 4 + 2 + 2 + 6
     }
 
     private fun describe(o: Outcome) = when (o) {

@@ -18,7 +18,8 @@ import io.github.timefreak7.fileforge.core.Limits
 import java.io.FileOutputStream
 
 /** Plain-language failure: shown to the user as is. */
-class ConversionException(message: String) : Exception(message)
+/** [code] lets the caller react to a failure kind (e.g. a PDF password) without parsing the message. */
+class ConversionException(message: String, val code: String? = null) : Exception(message)
 
 /** Runs inside a parser process (isolated or ":media"). Sees only the descriptors it is handed. */
 object ImageConverter {

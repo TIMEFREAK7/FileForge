@@ -18,6 +18,7 @@ import io.github.timefreak7.fileforge.image.ImageEngineClient
 import io.github.timefreak7.fileforge.image.ParserFailure
 import io.github.timefreak7.fileforge.pdf.PageRef
 import io.github.timefreak7.fileforge.pdf.PdfEngineClient
+import io.github.timefreak7.fileforge.pdf.PdfEngineClient.Companion.isPassword
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -59,13 +60,22 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                     JobOp.COMPRESS_PDF -> eachInput { i, input -> compress(pdf, i, input) }
                     JobOp.PDF_TO_IMAGES -> eachInput { i, input -> pdfToImages(images, pdf, i, input) }
                     JobOp.COMBINE_PDF -> whole { combine(images, pdf) }
-                    JobOp.ASSEMBLE_PDF -> whole { assemble(pdf, job.pages, suffix = if (chosen == null) "_edited" else "") }
-                    JobOp.SPLIT_PDF -> whole { split(pdf) }
+                    JobOp.ASSEMBLE_PDF -> whole {
+                        checkPasswords(pdf)
+                        assemble(pdf, job.pages, suffix = if (chosen == null) "_edited" else "")
+                    }
+                    JobOp.SPLIT_PDF -> whole {
+                        checkPasswords(pdf)
+                        split(pdf)
+                    }
                 }
             }
         }
         workDir.deleteRecursively()
-        if (job.inputs.all { it.done }) store.inputDir(id).deleteRecursively()
+        if (job.inputs.all { it.done }) {
+            store.inputDir(id).deleteRecursively()
+            PdfPasswords.clear(id)
+        }
         if (job.inputs.any { it.done }) Result.success() else Result.failure()
     }
 
@@ -85,13 +95,18 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         runCatching { setForeground(foregroundInfo(done, total)) }
     }
 
+    /** Set by [attempt] when its failure was a missing or wrong PDF password. */
+    private var passwordFailure = false
+
     /** Runs [block] and turns any failure into the plain-language message to show, or null on success. */
     private suspend fun attempt(block: suspend () -> Unit): String? = try {
+        passwordFailure = false
         block()
         null
     } catch (e: CancellationException) {
         throw e
     } catch (e: ParserFailure) {
+        passwordFailure = e.isPassword
         e.message ?: "The file could not be processed."
     } catch (e: StepFailure) {
         e.message
@@ -106,7 +121,7 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         job.inputs.forEachIndexed { index, input ->
             if (input.done || input.format == null) return@forEachIndexed
             val error = attempt { step(index, input) }
-            updateInput(index) { if (error == null) it.copy(done = true) else it.copy(error = error) }
+            updateInput(index) { if (error == null) it.copy(done = true) else it.copy(error = error, needsPassword = passwordFailure) }
             if (error == null) store.inputFile(job.id, index).delete()
             progress(job.inputs.count { it.done || it.error != null }, job.inputs.size)
         }
@@ -120,6 +135,29 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         }
         val error = attempt { step() }
         if (error == null) update { j -> j.copy(inputs = j.inputs.map { it.copy(done = true) }) } else failPending(error)
+    }
+
+    private fun password(index: Int) = PdfPasswords.get(job.id, index)
+
+    /**
+     * Opens every PDF input before a many-to-one job, so a missing or wrong password is pinned to its
+     * own file. Returns each input's page count (0 for images).
+     */
+    private suspend fun checkPasswords(pdf: PdfEngineClient): List<Int> {
+        var locked = false
+        val counts = job.inputs.mapIndexed { i, input ->
+            if (input.format != Format.PDF) return@mapIndexed 0
+            try {
+                pdf.pageCount(source(i), password(i))
+            } catch (e: ParserFailure) {
+                if (!e.isPassword) throw e
+                updateInput(i) { it.copy(error = e.message, needsPassword = true) }
+                locked = true
+                0
+            }
+        }
+        if (locked) throw StepFailure("Another file in this job needs its password, so nothing was saved.")
+        return counts
     }
 
     private fun source(index: Int): File = store.inputFile(job.id, index).takeIf { it.exists() }
@@ -141,7 +179,7 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
     private suspend fun compress(pdf: PdfEngineClient, index: Int, input: JobInput) {
         val src = source(index)
         val temp = File(workDir, "$index.pdf")
-        val replaced = pdf.compress(src, temp, job.preset.quality, job.preset.dpi, pdf.pageCount(src))
+        val replaced = pdf.compress(src, temp, job.preset.quality, job.preset.dpi, pdf.pageCount(src, password(index)), password(index), job.removePassword)
         if (replaced == 0 || temp.length() >= src.length()) {
             temp.delete()
             updateInput(index) { it.copy(note = "Already as small as it gets, so no copy was saved.") }
@@ -152,10 +190,10 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
 
     private suspend fun pdfToImages(images: ImageEngineClient, pdf: PdfEngineClient, index: Int, input: JobInput) {
         val src = source(index)
-        val count = pdf.pageCount(src)
+        val count = pdf.pageCount(src, password(index))
         val temp = File(workDir, "$index.${job.target.extension}")
         for (page in job.inputs[index].pagesDone until count) {
-            val pixels = pdf.renderPixels(src, page, job.preset.dpi)
+            val pixels = pdf.renderPixels(src, page, job.preset.dpi, password = password(index))
             try {
                 images.encode(pixels, temp, job.target, job.preset.quality)
             } finally {
@@ -169,7 +207,8 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
 
     private suspend fun combine(images: ImageEngineClient, pdf: PdfEngineClient) {
         if (job.inputs.all { it.format == Format.PDF }) {
-            val pages = job.inputs.indices.flatMap { i -> List(pdf.pageCount(source(i))) { PageRef(i, it) } }
+            val counts = checkPasswords(pdf)
+            val pages = job.inputs.indices.flatMap { i -> List(counts[i]) { PageRef(i, it) } }
             assemble(pdf, pages, suffix = if (chosen == null) "_merged" else "")
             return
         }
@@ -192,7 +231,7 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
 
     private suspend fun assemble(pdf: PdfEngineClient, pages: List<PageRef>, suffix: String) {
         val temp = File(workDir, "out.pdf")
-        pdf.assemble(job.inputs.indices.map { source(it) }, pages, temp)
+        pdf.assemble(job.inputs.indices.map { source(it) }, pages, temp, job.inputs.indices.map(::password), job.removePassword)
         save(temp, name(job.inputs[0], Format.PDF, suffix), Format.PDF)
     }
 
@@ -201,7 +240,7 @@ class ConvertWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         val sources = job.inputs.indices.map { source(it) }
         for (part in job.outputs.size until job.splits.size) {
             val temp = File(workDir, "part.pdf")
-            pdf.assemble(sources, job.splits[part], temp)
+            pdf.assemble(sources, job.splits[part], temp, job.inputs.indices.map(::password), job.removePassword)
             save(temp, name(job.inputs[0], Format.PDF, "_part${part + 1}"), Format.PDF)
             progress(part + 1, job.splits.size)
         }

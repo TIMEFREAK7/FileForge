@@ -20,16 +20,33 @@ abstract class PdfEngineService : Service() {
     private val binder = object : IPdfEngine.Stub() {
         override fun pid(): Int = Process.myPid()
 
-        override fun info(pdf: ParcelFileDescriptor) = safely(pdf) { putInt("pages", PdfOps.info(pdf)) }
+        override fun info(pdf: ParcelFileDescriptor, password: String?) = safely(pdf) { putInt("pages", PdfOps.info(pdf, password.orEmpty())) }
 
-        override fun renderPage(pdf: ParcelFileDescriptor, page: Int, dpi: Int, widthPx: Int) =
-            safely(pdf) { putAll(PdfOps.renderPage(pdf, page, dpi, widthPx)) }
+        override fun renderPage(pdf: ParcelFileDescriptor, password: String?, page: Int, dpi: Int, widthPx: Int) =
+            safely(pdf) { putAll(PdfOps.renderPage(pdf, password.orEmpty(), page, dpi, widthPx)) }
 
-        override fun assemble(inputs: Array<ParcelFileDescriptor>, spec: IntArray, output: ParcelFileDescriptor) =
-            safely(*inputs, output) { putInt("pages", PdfOps.assemble(inputs, spec, output)) }
+        override fun assemble(
+            inputs: Array<ParcelFileDescriptor>,
+            passwords: Array<String?>,
+            spec: IntArray,
+            output: ParcelFileDescriptor,
+            removePassword: Boolean,
+            newPassword: String?,
+        ) = safely(*inputs, output) {
+            val pw = List(inputs.size) { passwords.getOrNull(it).orEmpty() }
+            putInt("pages", PdfOps.assemble(inputs, pw, spec, output, removePassword, newPassword.orEmpty()))
+        }
 
-        override fun compress(input: ParcelFileDescriptor, output: ParcelFileDescriptor, quality: Int, dpi: Int) =
-            safely(input, output) { putInt("replaced", PdfOps.compress(input, output, quality.coerceIn(1, 100), dpi.coerceIn(36, 600))) }
+        override fun compress(
+            input: ParcelFileDescriptor,
+            password: String?,
+            output: ParcelFileDescriptor,
+            quality: Int,
+            dpi: Int,
+            removePassword: Boolean,
+        ) = safely(input, output) {
+            putInt("replaced", PdfOps.compress(input, password.orEmpty(), output, quality.coerceIn(1, 100), dpi.coerceIn(36, 600), removePassword))
+        }
 
         override fun imagesToPdf(jpegs: Array<ParcelFileDescriptor>, output: ParcelFileDescriptor, pageSize: String) =
             safely(*jpegs, output) {
@@ -46,7 +63,7 @@ abstract class PdfEngineService : Service() {
             putBoolean("ok", true)
         }
     } catch (e: ConversionException) {
-        failure(e.message ?: "The PDF could not be processed.")
+        failure(e.message ?: "The PDF could not be processed.", e.code)
     } catch (e: OutOfMemoryError) {
         failure("This PDF is too large for this phone.")
     } catch (t: Throwable) {
@@ -55,9 +72,10 @@ abstract class PdfEngineService : Service() {
         fds.forEach { runCatching { it.close() } }
     }
 
-    private fun failure(message: String) = Bundle().apply {
+    private fun failure(message: String, code: String? = null) = Bundle().apply {
         putBoolean("ok", false)
         putString("error", message)
+        putString("code", code)
     }
 
     override fun onBind(intent: Intent): IBinder = binder

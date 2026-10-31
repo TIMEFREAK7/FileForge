@@ -19,8 +19,8 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 import kotlin.coroutines.resume
 
-/** A plain-language failure that ends one operation; its message is shown to the user. */
-class ParserFailure(message: String) : Exception(message)
+/** A plain-language failure that ends one operation; its message is shown to the user. [code] is set by the engine. */
+class ParserFailure(message: String, val code: String? = null) : Exception(message)
 
 /**
  * Main-process side of the parser processes: binds them, runs one call at a time with the S5 timeout,
@@ -76,7 +76,7 @@ class ParserCalls<T : Any>(
             throw ParserFailure("This file took too long to convert and was stopped.")
         }
         bundle.classLoader = SharedMemory::class.java.classLoader
-        if (!bundle.getBoolean("ok")) throw ParserFailure(bundle.getString("error") ?: "Conversion failed.")
+        if (!bundle.getBoolean("ok")) throw ParserFailure(bundle.getString("error") ?: "Conversion failed.", bundle.getString("code"))
         return bundle
     }
 

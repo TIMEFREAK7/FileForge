@@ -63,6 +63,8 @@ import io.github.timefreak7.fileforge.jobs.IncomingFile
 import io.github.timefreak7.fileforge.jobs.JobQueue
 import io.github.timefreak7.fileforge.pdf.PageRef
 import io.github.timefreak7.fileforge.pdf.PdfEngineClient
+import io.github.timefreak7.fileforge.pdf.PdfEngineClient.Companion.isPassword
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -72,7 +74,10 @@ import java.io.File
 import java.util.UUID
 
 /** A PDF the organiser has loaded: a private copy, so thumbnails and the job never depend on a share grant. */
-private data class LoadedPdf(val name: String, val file: File, val pages: Int)
+private data class LoadedPdf(val name: String, val file: File, val pages: Int, val password: String? = null)
+
+/** An open password prompt; [answer] completes with (password, save without password) or null for Cancel. */
+private class PasswordAsk(val request: PasswordRequest, val answer: CompletableDeferred<Pair<String, Boolean>?>)
 
 /** One page tile; [key] keeps selection attached to the page while pages move. */
 private data class PageItem(val key: Int, val ref: PageRef)
@@ -102,6 +107,12 @@ fun PdfPagesScreen(start: List<IncomingFile>, onQueued: (String) -> Unit, onClos
     var nextKey by remember { mutableIntStateOf(0) }
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
+    var asking by remember { mutableStateOf<PasswordAsk?>(null) }
+    // S14: passwords stay in memory on this screen and in the job; this choice applies to the saved PDF.
+    var removePassword by remember { mutableStateOf(false) }
+
+    suspend fun askPassword(request: PasswordRequest): Pair<String, Boolean>? =
+        PasswordAsk(request, CompletableDeferred()).also { asking = it }.answer.await().also { asking = null }
 
     fun add(files: List<IncomingFile>) {
         scope.launch {
@@ -109,10 +120,26 @@ fun PdfPagesScreen(start: List<IncomingFile>, onQueued: (String) -> Unit, onClos
             val errors = mutableListOf<String>()
             for (f in files) {
                 try {
-                    val loaded = load(context, engine, f, dir)
+                    val dest = copyPdf(context, f, dir)
+                    var password: String? = null
+                    var pages: Int? = null
+                    while (pages == null) {
+                        try {
+                            pages = engine.pageCount(dest, password)
+                        } catch (e: ParserFailure) {
+                            if (!e.isPassword) throw e
+                            val answer = askPassword(PasswordRequest(f.name, e.message.takeIf { e.code == PdfEngineClient.WRONG_PASSWORD })) ?: break
+                            password = answer.first
+                            if (answer.second) removePassword = true
+                        }
+                    }
+                    if (pages == null) {
+                        dest.delete() // cancelled at the password prompt
+                        continue
+                    }
                     val input = pdfs.size
-                    pdfs += loaded
-                    repeat(loaded.pages) { items += PageItem(nextKey++, PageRef(input, it)) }
+                    pdfs += LoadedPdf(f.name.take(200), dest, pages, password)
+                    repeat(pages) { items += PageItem(nextKey++, PageRef(input, it)) }
                 } catch (e: ParserFailure) {
                     errors += "${f.name}: ${e.message}"
                 }
@@ -132,12 +159,22 @@ fun PdfPagesScreen(start: List<IncomingFile>, onQueued: (String) -> Unit, onClos
         if (loading) return
         loading = true // also stops a second tap from queuing the job twice
         scope.launch {
-            JobQueue.enqueuePages(context, files, AppSettings(context).defaultPreset(Format.PDF), pages, splits)
+            val passwords = pdfs.withIndex().mapNotNull { (i, p) -> p.password?.let { i to it } }.toMap()
+            JobQueue.enqueuePages(context, files, AppSettings(context).defaultPreset(Format.PDF), pages, splits, passwords, removePassword)
             onQueued(what)
             onClose()
         }
     }
 
+    asking?.let { ask ->
+        PasswordDialog(
+            files = listOf(ask.request),
+            offerRemove = true,
+            note = null,
+            onSubmit = { pw, remove -> ask.answer.complete(pw[0] to remove) },
+            onDismiss = { ask.answer.complete(null) },
+        )
+    }
     BackHandler(onBack = onClose)
     val chosen = items.filter { it.key in selected }
     Surface(Modifier.fillMaxSize()) {
@@ -223,7 +260,7 @@ private fun PageTile(
     onToggle: () -> Unit,
 ) {
     val thumb by produceState<ImageBitmap?>(null, pdf.file, item.ref.page) {
-        value = runCatching { renderLock.withLock { engine.renderBitmap(pdf.file, item.ref.page, 240) } }.getOrNull()?.asImageBitmap()
+        value = runCatching { renderLock.withLock { engine.renderBitmap(pdf.file, item.ref.page, 240, pdf.password) } }.getOrNull()?.asImageBitmap()
     }
     val rotated = if (item.ref.rotation != 0) ", turned ${item.ref.rotation} degrees" else ""
     Card(
@@ -245,8 +282,8 @@ private fun PageTile(
     }
 }
 
-/** Copies one PDF into [dir] and counts its pages in the isolated process. Throws [ParserFailure]. */
-private suspend fun load(context: Context, engine: PdfEngineClient, file: IncomingFile, dir: File): LoadedPdf {
+/** Copies one PDF into [dir] and checks its header. Throws [ParserFailure]. */
+private suspend fun copyPdf(context: Context, file: IncomingFile, dir: File): File {
     val dest = File(dir, UUID.randomUUID().toString())
     withContext(Dispatchers.IO) {
         try {
@@ -273,7 +310,7 @@ private suspend fun load(context: Context, engine: PdfEngineClient, file: Incomi
         val header = dest.inputStream().use { it.readNBytes(5) }
         if (!header.contentEquals("%PDF-".toByteArray())) throw ParserFailure("This is not a PDF.")
     }
-    return LoadedPdf(file.name.take(200), dest, engine.pageCount(dest))
+    return dest
 }
 
 /** Moves every selected page one step, keeping selected neighbours together. */

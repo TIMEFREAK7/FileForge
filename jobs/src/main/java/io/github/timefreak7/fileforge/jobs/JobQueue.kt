@@ -63,7 +63,12 @@ object JobQueue {
         preset: Preset,
         pages: List<PageRef> = emptyList(),
         splits: List<List<PageRef>> = emptyList(),
-    ): String = add(context, files, Format.PDF, preset, if (splits.isEmpty()) JobOp.ASSEMBLE_PDF else JobOp.SPLIT_PDF, pages, splits)
+        passwords: Map<Int, String> = emptyMap(),
+        removePassword: Boolean = false,
+    ): String = add(
+        context, files, Format.PDF, preset, if (splits.isEmpty()) JobOp.ASSEMBLE_PDF else JobOp.SPLIT_PDF,
+        pages, splits, passwords, removePassword,
+    )
 
     private suspend fun add(
         context: Context,
@@ -73,6 +78,8 @@ object JobQueue {
         op: JobOp,
         pages: List<PageRef> = emptyList(),
         splits: List<List<PageRef>> = emptyList(),
+        passwords: Map<Int, String> = emptyMap(),
+        removePassword: Boolean = false,
     ): String = withContext(Dispatchers.IO) {
         require(files.size <= Limits.MAX_FILES_PER_JOB) { "too many files" }
         val store = JobStore(context)
@@ -80,7 +87,8 @@ object JobQueue {
         store.inputDir(id).mkdirs()
         val pdf = op != JobOp.CONVERT && (op != JobOp.COMBINE_PDF || files.all { it.format == Format.PDF })
         val inputs = files.mapIndexed { i, f -> copyIn(context, f, store.inputFile(id, i), pdf) }
-        store.save(JobRecord(id, System.currentTimeMillis(), target, preset, inputs, op, pages = pages, splits = splits))
+        store.save(JobRecord(id, System.currentTimeMillis(), target, preset, inputs, op, pages = pages, splits = splits, removePassword = removePassword))
+        PdfPasswords.add(id, passwords)
         start(context, id)
         id
     }
@@ -96,11 +104,20 @@ object JobQueue {
         }
     }
 
-    /** Re-runs the inputs of [id] that failed. Inputs already converted are skipped. */
-    fun retry(context: Context, id: String) {
+    /**
+     * Re-runs the inputs of [id] that failed. Inputs already converted are skipped. [passwords] (by input
+     * index) are kept in memory only; [removePassword] null keeps the job's earlier choice.
+     */
+    fun retry(context: Context, id: String, passwords: Map<Int, String> = emptyMap(), removePassword: Boolean? = null) {
         val store = JobStore(context)
         val job = store.load(id) ?: return
-        store.save(job.copy(inputs = job.inputs.map { if (it.done) it else it.copy(error = null, note = null) }))
+        PdfPasswords.add(id, passwords)
+        store.save(
+            job.copy(
+                removePassword = removePassword ?: job.removePassword,
+                inputs = job.inputs.map { if (it.done) it else it.copy(error = null, note = null, needsPassword = false) },
+            ),
+        )
         start(context, id)
         recordsChanged.update { it + 1 }
     }
@@ -112,6 +129,7 @@ object JobQueue {
     /** Removes a finished job and the inputs it kept for Retry. Converted files stay in the output folder. */
     fun dismiss(context: Context, id: String) {
         WorkManager.getInstance(context).cancelUniqueWork(id)
+        PdfPasswords.clear(id)
         JobStore(context).delete(id)
         recordsChanged.update { it + 1 }
     }

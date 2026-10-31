@@ -26,7 +26,7 @@ import io.github.timefreak7.fileforge.jobs.JobQueue
 import io.github.timefreak7.fileforge.jobs.JobView
 
 @Composable
-fun JobsScreen(jobs: List<JobView>, contentPadding: PaddingValues) {
+fun JobsScreen(jobs: List<JobView>, contentPadding: PaddingValues, onEnterPassword: (String) -> Unit) {
     val context = LocalContext.current
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -91,7 +91,10 @@ fun JobsScreen(jobs: List<JobView>, contentPadding: PaddingValues) {
                             TextButton(onClick = { JobQueue.cancel(context, record.id) }) { Text("Cancel") }
                         } else {
                             val retryable = failed.any { it.format != null } || (job.state == WorkInfo.State.CANCELLED && converted < job.total)
-                            if (retryable) TextButton(onClick = { JobQueue.retry(context, record.id) }) { Text("Retry") }
+                            when {
+                                failed.any { it.needsPassword } -> TextButton(onClick = { onEnterPassword(record.id) }) { Text("Enter password") }
+                                retryable -> TextButton(onClick = { JobQueue.retry(context, record.id) }) { Text("Retry") }
+                            }
                             TextButton(onClick = { JobQueue.dismiss(context, record.id) }) { Text("Remove") }
                         }
                     }

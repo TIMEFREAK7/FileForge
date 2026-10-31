@@ -18,7 +18,7 @@ Scope from [spec.md](spec.md#build-phases-and-testing-gates): merge, split, comp
 
 Install the debug APK over the old one, then:
 
-1. **Self-tests:** Settings → Run self-tests → **Quick**, then **Full** (adds 1,000 mutated PDFs). Screenshot the summary and any red lines. The PDF lines: page tools, PDF ↔ images, damaged PDFs, 300-page merge and split, JPEG encode probe, scanned-PDF compression, PDF fuzz.
+1. **Self-tests:** Settings → Run self-tests → **Quick**, then **Full** (adds 1,000 mutated PDFs). Screenshot the summary and any red lines. The PDF lines: page tools, PDF ↔ images, damaged PDFs, 300-page merge and split, JPEG encode probe, scanned-PDF compression, PDF fuzz, protected PDFs (these run two real merge jobs; their outputs appear in the output folder for a moment and are deleted).
 2. **Compress a real scan:** share a scanned PDF to FileForge → Compress. Compare the sizes in Jobs and Files, and open the result to check it reads well.
 3. **Merge:** Pick files → choose 2–3 PDFs → Merge. Open the result.
 4. **PDF → images:** share a PDF → JPG pages. The pages appear in Recents as `name_p001.jpg`, …
@@ -26,6 +26,7 @@ Install the debug APK over the old one, then:
 6. **Organiser:** Edit PDF pages → pick a PDF. Select pages; try Rotate, Delete, Move earlier, Add PDF; then Save as PDF. Also try Extract selected and Split before selected.
 7. **Airplane mode:** repeat 2 and 6 with airplane mode on.
 8. **TalkBack:** in the organiser, each page reads its position, page number and file; double-tap selects it.
+9. **Password-protected PDF** (a bank or card statement is usually one): share it → Merge with another PDF, or Compress. A password prompt should open; try a wrong password first, then the right one. Open the result: it should ask for the same password. Repeat with "Save without a password" ticked: the result opens without one. Also add it in Edit PDF pages.
 
 Send screenshots of step 1 and anything that looked wrong.
 
@@ -43,7 +44,9 @@ Send screenshots of step 1 and anything that looked wrong.
 
 ## Not done yet (honest gaps)
 
-- **Password-protected PDFs are not supported yet.** They fail with "This PDF needs a password to open. Password support comes in a later update." The Phase 2 gate item "merging a protected PDF gives a protected output" (and S14) cannot pass until this lands, so **the Phase 2 gate stays open** even if every self-test passes.
+- **Passwords are forgotten if Android stops FileForge mid-job** (by design, S14): the job then asks again.
+- A PDF opened with its open password gets a new random owner password, so its restrictions (no printing, no copying) carry over but can no longer be lifted with the original owner password. FileForge does not enforce those restrictions itself.
+- Certificate-encrypted PDFs (rare, used by some companies) are not supported.
 - Merge, split and page tools keep the pages' content, but **form fields stop working, bookmarks are dropped and links within the document may break**; compress keeps all three. Images inside form XObjects are not compressed.
 - Compress replaces an image only when the JPEG is smaller; a PDF that is already lean comes back with a note and no copy.
 - No "grid of PDF tools" on Home: merge, compress and PDF → images are donut segments, and the organiser has its own button.

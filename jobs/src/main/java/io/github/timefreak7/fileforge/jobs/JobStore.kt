@@ -37,6 +37,8 @@ data class JobInput(
     val error: String? = null,
     /** Something worth knowing that is not a failure, e.g. "already as small as it gets". */
     val note: String? = null,
+    /** The last failure was a missing or wrong PDF password: the UI asks for it. The password itself is never stored. */
+    val needsPassword: Boolean = false,
 )
 
 /** A file the job saved in the output folder. */
@@ -52,6 +54,8 @@ data class JobRecord(
     val outputs: List<JobOutput> = emptyList(),
     val pages: List<PageRef> = emptyList(),
     val splits: List<List<PageRef>> = emptyList(),
+    /** The user chose to save protected PDFs without their password (S14). */
+    val removePassword: Boolean = false,
 ) {
     val failed: List<JobInput> get() = inputs.filter { it.error != null }
 
@@ -120,11 +124,13 @@ class JobStore(context: Context) {
                 put("pagesDone", input.pagesDone)
                 input.error?.let { put("error", it) }
                 input.note?.let { put("note", it) }
+                put("needsPassword", input.needsPassword)
             }
         }))
         put("outputs", JSONArray(job.outputs.map { JSONObject().put("uri", it.uri).put("name", it.name).put("format", it.format.name) }))
         put("pages", pagesJson(job.pages))
         put("splits", JSONArray(job.splits.map { pagesJson(it) }))
+        put("removePassword", job.removePassword)
     }
 
     private fun fromJson(o: JSONObject): JobRecord {
@@ -157,11 +163,13 @@ class JobStore(context: Context) {
                     pagesDone = x.optInt("pagesDone", 0),
                     error = x.optString("error").ifEmpty { null },
                     note = x.optString("note").ifEmpty { null },
+                    needsPassword = x.optBoolean("needsPassword", false),
                 )
             },
             outputs = outputs,
             pages = o.optJSONArray("pages")?.let(::pagesFrom).orEmpty(),
             splits = o.optJSONArray("splits")?.let { a -> List(a.length()) { pagesFrom(a.getJSONArray(it)) } }.orEmpty(),
+            removePassword = o.optBoolean("removePassword", false),
         )
     }
 

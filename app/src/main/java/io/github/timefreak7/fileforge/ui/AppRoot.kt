@@ -52,6 +52,8 @@ import io.github.timefreak7.fileforge.core.Targets
 import io.github.timefreak7.fileforge.image.ImageEngineClient
 import io.github.timefreak7.fileforge.jobs.AppSettings
 import io.github.timefreak7.fileforge.jobs.IncomingFile
+import io.github.timefreak7.fileforge.jobs.JobOp
+import io.github.timefreak7.fileforge.pdf.PdfEngineClient
 import io.github.timefreak7.fileforge.jobs.JobQueue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -89,6 +91,10 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
     var selfTest by remember { mutableStateOf(false) }
     var pdfPages by remember { mutableStateOf<List<IncomingFile>?>(null) }
     val jobs by remember { JobQueue.observe(context) }.collectAsStateWithLifecycle(emptyList())
+    // Password prompts open by themselves for jobs started in this session; older ones via their Jobs card.
+    val sessionStart = remember { System.currentTimeMillis() }
+    var promptDismissed by remember { mutableStateOf(setOf<String>()) }
+    var promptAsked by remember { mutableStateOf<String?>(null) }
 
     val folderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -215,7 +221,10 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                         onCancel = { if (donut?.dragPosition != null) donut = null },
                     ),
                 )
-                Tab.Jobs -> JobsScreen(jobs, padding)
+                Tab.Jobs -> JobsScreen(jobs, padding, onEnterPassword = { id ->
+                    promptDismissed = promptDismissed - id
+                    promptAsked = id
+                })
                 Tab.Settings -> SettingsScreen(
                     settings = settings,
                     contentPadding = padding,
@@ -254,6 +263,23 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                     onEditPages = editPages,
                 )
             }
+        }
+        jobs.firstOrNull { job ->
+            val r = job.record
+            !job.running && r.id !in promptDismissed && (r.createdAt >= sessionStart || r.id == promptAsked) &&
+                r.inputs.any { it.needsPassword && it.error != null }
+        }?.let { job ->
+            val r = job.record
+            val locked = r.inputs.withIndex().filter { it.value.needsPassword && it.value.error != null }
+            PasswordDialog(
+                files = locked.map { PasswordRequest(it.value.name, it.value.error?.takeIf { e -> e != PdfEngineClient.PASSWORD_NEEDED_MESSAGE }) },
+                offerRemove = r.op != JobOp.PDF_TO_IMAGES,
+                note = if (r.op == JobOp.PDF_TO_IMAGES) "The pages are saved as images, which cannot have a password." else null,
+                onSubmit = { passwords, remove ->
+                    JobQueue.retry(context, r.id, locked.mapIndexed { k, it -> it.index to passwords[k] }.toMap(), remove)
+                },
+                onDismiss = { promptDismissed = promptDismissed + r.id },
+            )
         }
         options?.let { o ->
             OptionsSheet(
