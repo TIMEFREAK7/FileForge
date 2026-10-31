@@ -174,7 +174,10 @@ object PdfOps {
                 for (name in resources.xObjectNames.toList()) {
                     if (!resources.isImageXObject(name)) continue
                     val image = resources.getXObject(name) as? PDImageXObject ?: continue
-                    val smaller = done.getOrPut(image.cosObject) { recompress(doc, image, quality, maxW, maxH) }
+                    // Not getOrPut: it treats a stored null ("keep the original") as missing, so an image shared by
+                    // several pages was decoded again and PDFBox returned its cached bitmap, already recycled.
+                    val key = image.cosObject
+                    val smaller = if (key in done) done[key] else recompress(doc, image, quality, maxW, maxH).also { done[key] = it }
                     if (smaller != null) {
                         resources.put(name, smaller)
                         replaced++

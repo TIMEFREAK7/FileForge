@@ -41,6 +41,8 @@ Send screenshots of step 1 and anything that looked wrong.
 | Fuzz PDF × 50 (Quick) | App survived; 0 reader crashes, 0 timeouts. The 1,000-file Full run is still to do |
 | Real files from the app | Compress (a lean PDF correctly saved nothing), photo → PDF, HEIC → JPG, merge, JPG pages |
 | Fixed | Each share or Open with left another FileForge card in recent apps; the activity is now single-task |
+| Protected PDFs (self-test, Oct 31) | Gate passed: a real merge job asked for the password, caught a wrong one, and the output asked for the same password. S14: password found nowhere in app storage |
+| Fixed | Compress crashed when an image that does not shrink appears on several pages (a logo, a repeated picture): the "keep original" result was not remembered, so the image was decoded twice |
 
 ## Not done yet (honest gaps)
 
