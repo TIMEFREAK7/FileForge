@@ -1,6 +1,7 @@
 package io.github.timefreak7.fileforge.pdf
 
 import android.app.Service
+import android.content.pm.ApplicationInfo
 import android.content.Intent
 import android.os.Bundle
 import android.os.IBinder
@@ -67,9 +68,16 @@ abstract class PdfEngineService : Service() {
     } catch (e: OutOfMemoryError) {
         failure("This PDF is too large for this phone.")
     } catch (t: Throwable) {
-        failure("The PDF could not be processed (${t.javaClass.simpleName}).")
+        failure("The PDF could not be processed (${t.javaClass.simpleName}).${debugDetail(t)}")
     } finally {
         fds.forEach { runCatching { it.close() } }
+    }
+
+    /** Debug builds only: the message and the innermost frames, so a self-test failure can be traced from a screenshot. */
+    private fun debugDetail(t: Throwable): String {
+        if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return ""
+        val frames = t.stackTrace.take(4).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+        return " [${t.message}] at $frames"
     }
 
     private fun failure(message: String, code: String? = null) = Bundle().apply {

@@ -448,25 +448,27 @@ class SelfTest(
         val plain = makePdf(3, "plain") { Color.WHITE }
         val locked = File(dir, "locked.pdf")
         pdf.assemble(listOf(plain), List(3) { PageRef(0, it) }, locked, newPassword = secret)
-        val asked = failureCode { pdf.pageCount(locked) }
-        val wrong = failureCode { pdf.pageCount(locked, "not-it") }
-        report(
-            asked == PdfEngineClient.PASSWORD_NEEDED && wrong == PdfEngineClient.WRONG_PASSWORD && pdf.pageCount(locked, secret) == 3,
-            "Protected PDF: no password → asks ($asked), wrong → \"wrong\" ($wrong), right → opens",
-        )
-        tick()
-        val page = pdf.renderBitmap(locked, 0, 200, secret)
-        report(page.width == 200, "Protected PDF renders with its password (Android's PDF renderer)")
-        tick()
-        val kept = File(dir, "kept.pdf")
-        val removed = File(dir, "removed.pdf")
-        pdf.compress(locked, kept, 70, 72, 3, secret)
-        pdf.compress(locked, removed, 70, 72, 3, secret, removePassword = true)
-        report(
-            failureCode { pdf.pageCount(kept) } == PdfEngineClient.PASSWORD_NEEDED && pdf.pageCount(removed) == 3,
-            "Compress keeps the password; \"Save without a password\" removes it",
-        )
-        tick()
+        // Each check reports on its own, so one failure does not hide the rest (or the S14 scan).
+        check("Protected PDF opens only with its password") {
+            val asked = failureCode { pdf.pageCount(locked) }
+            val wrong = failureCode { pdf.pageCount(locked, "not-it") }
+            (asked == PdfEngineClient.PASSWORD_NEEDED && wrong == PdfEngineClient.WRONG_PASSWORD && pdf.pageCount(locked, secret) == 3) to
+                "no password → $asked, wrong → $wrong, right → opens"
+        }
+        check("Protected PDF renders with its password (Android's PDF renderer)") {
+            val page = pdf.renderBitmap(locked, 0, 200, secret)
+            (page.width == 200) to "${page.width}×${page.height}"
+        }
+        check("Compress keeps the password") {
+            val kept = File(dir, "kept.pdf")
+            pdf.compress(locked, kept, 70, 72, 3, secret)
+            (failureCode { pdf.pageCount(kept) } == PdfEngineClient.PASSWORD_NEEDED && pdf.pageCount(kept, secret) == 3) to "still asks"
+        }
+        check("Compress with \"Save without a password\" removes it") {
+            val removed = File(dir, "removed.pdf")
+            pdf.compress(locked, removed, 70, 72, 3, secret, removePassword = true)
+            (pdf.pageCount(removed) == 3) to "opens without one"
+        }
 
         val files = listOf(IncomingFile(Uri.fromFile(locked), "locked.pdf", Format.PDF), IncomingFile(Uri.fromFile(plain), "plain.pdf", Format.PDF))
         suspend fun mergeJob(removePassword: Boolean): Pair<File?, String> {
@@ -485,7 +487,8 @@ class SelfTest(
                 }
             }
             JobQueue.dismiss(context, id)
-            return out to "asked $askedFirst, wrong password caught $wrongAgain, saved ${out != null}"
+            val errors = job.inputs.mapNotNull { it.error }.distinct().joinToString("; ")
+            return out to "asked $askedFirst, wrong password caught $wrongAgain, saved ${out != null}" + if (errors.isEmpty()) "" else " ($errors)"
         }
         val (merged, steps) = mergeJob(removePassword = false)
         report(
@@ -505,6 +508,19 @@ class SelfTest(
             .map { it.relativeTo(context.dataDir).path }
             .toList()
         report(found.isEmpty(), "S14: password found in app storage: ${if (found.isEmpty()) "nowhere" else found.joinToString()}")
+        tick()
+    }
+
+    /** One reported check; an exception fails this check only, with its message. */
+    private suspend fun check(name: String, block: suspend () -> Pair<Boolean, String>) {
+        try {
+            val (ok, detail) = block()
+            report(ok, "$name: $detail")
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            report(false, "$name: ${t.javaClass.simpleName}: ${t.message}")
+        }
         tick()
     }
 
@@ -644,7 +660,7 @@ class SelfTest(
         const val PHOTOS = 100
         const val SPEED_RUNS = 3
         /** Checks in the PDF sections, not counting the PDF fuzz pass. */
-        const val PDF_TICKS = 4 + 3 + 4 + 2 + 2 + 6
+        const val PDF_TICKS = 4 + 3 + 4 + 2 + 2 + 7
     }
 
     private fun describe(o: Outcome) = when (o) {
