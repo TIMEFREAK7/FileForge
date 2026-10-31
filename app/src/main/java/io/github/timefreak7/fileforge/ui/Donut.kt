@@ -41,6 +41,8 @@ import kotlinx.coroutines.delay
 
 private val InnerRadius = 52.dp
 private val OuterRadius = 132.dp
+/** Navigation bar plus gesture area: the ring never opens under them. */
+private val BottomReserve = 112.dp
 private const val HOLD_FOR_OPTIONS_MS = 600L
 
 /**
@@ -74,9 +76,10 @@ fun DonutOverlay(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val width = constraints.maxWidth.toFloat()
         val height = constraints.maxHeight.toFloat()
-        // Opens under the finger, nudged inward so the whole ring stays on screen.
+        // Opens under the finger, nudged inward so the whole ring stays on screen and clear of the bottom bar.
+        val bottomBar = with(density) { BottomReserve.toPx() }
         val c = (center ?: Offset(width / 2, height / 2)).let {
-            Offset(it.x.coerceIn(outer, width - outer), it.y.coerceIn(outer, height - outer))
+            Offset(it.x.coerceIn(outer, width - outer), it.y.coerceAtMost(height - outer - bottomBar).coerceAtLeast(outer))
         }
         val sweep = 360f / slots.size
 
@@ -165,9 +168,9 @@ fun DonutOverlay(
                 modifier = Modifier.centeredAt(c),
             )
             if (onEditPages != null) {
-                // Under the ring, or above it when the ring sits near the bottom of the screen.
+                // Above the ring (the ring usually opens low, over Recents), below it when there is no room above.
                 val gap = with(density) { 44.dp.toPx() }
-                val y = if (c.y + outer + gap * 1.5f < height) c.y + outer + gap else c.y - outer - gap
+                val y = if (c.y - outer - gap * 1.5f > 0) c.y - outer - gap else c.y + outer + gap
                 FilledTonalButton(onClick = onEditPages, modifier = Modifier.centeredAt(Offset(c.x, y)).heightIn(min = 48.dp)) {
                     Text("Edit pages")
                 }

@@ -104,6 +104,7 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
 
     fun openDonut(files: List<IncomingFile>) {
         if (files.isEmpty()) return
+        snackbar.currentSnackbarData?.dismiss()
         donut = DonutState(files.take(Limits.MAX_FILES_PER_JOB), center = null, dragPosition = null)
     }
 
@@ -193,6 +194,7 @@ fun AppRoot(incoming: List<IncomingFile>?, onIncomingHandled: () -> Unit, debugT
                     onEditPdf = { pdfPicker.launch(arrayOf("application/pdf")) },
                     drag = DonutDrag(
                         onStart = { file, p ->
+                            snackbar.currentSnackbarData?.dismiss()
                             donut = if (useList) DonutState(listOf(file), null, null) else DonutState(listOf(file), p, p)
                         },
                         onMove = { p -> donut = donut?.takeIf { it.dragPosition != null }?.copy(dragPosition = p) ?: donut },
