@@ -5,9 +5,8 @@ Written 12 Nov 2026 after a full read-through audit. This file is everything nee
 ## 1. Where things are
 
 - **Repository:** `TIMEFREAK7/FileForge` (public, MIT).
-- **`main` is empty:** only `LICENSE` and a Node-template `.gitignore`.
-- **All code is on `ccr-92ca601b-ogu37r`:** 34 commits, last one 31 Oct 2026, CI green on every push. There is no PR, no README and no release.
-- **Read these first, on that branch:** `docs/spec.md` (the contract), then `docs/phase0.md` to `docs/phase3.md` (what is built, what was measured, known gaps).
+- **All code is on `main`** (merged 12 Nov 2026; last code change 31 Oct 2026, CI green). There is no README and no release.
+- **Read these first:** `docs/spec.md` (the contract), then `docs/phase0.md` to `docs/phase3.md` (what is built, what was measured, known gaps).
 
 FileForge is a Kotlin, Jetpack Compose Android app (minSdk 36) that converts and edits images and PDFs fully offline, for family use. It has no network permission by design.
 
@@ -140,7 +139,7 @@ Each milestone ends with CI green. Do them in order unless the owner's answers c
 
 | # | Milestone | Done when |
 | --- | --- | --- |
-| M0 | Land the project | The code is on `main` through a PR (Q1), with a README: what the app is, how to build, how to install, where the spec is. `docs/phase0.md` fixed. |
+| M0 | Land the project | `main` has a README: what the app is, how to build, how to install, where the spec is. `docs/phase0.md` fixed. |
 | M1 | Correctness | B1 to B7 fixed, each with a test that failed before the fix. The smaller defects in section 5 fixed where cheap. Owner re-runs Quick self-tests on the phone. |
 | M2 | Close the open gates | Owner runs the Phase 2 and Phase 3 phone checklists; results recorded in the phase docs; anything they find is fixed. Unit tests added for `JobStore`, `opFor`, `move`, `splitBefore`. CI gets a weekly schedule and SHA-pinned actions. |
 | M3 | UI consistency | Section 7 done. Owner checks light and dark mode, large font, and TalkBack on the phone. |
@@ -156,7 +155,7 @@ Ask these first. Each has a default so work can proceed on the parts that do not
 
 | # | Question | Default if unanswered |
 | --- | --- | --- |
-| Q1 | How should the code reach `main`: one PR from `ccr-92ca601b-ogu37r`, and which branch should new work go on? | Do not open a PR without a yes. Work on a new branch cut from `ccr-92ca601b-ogu37r`. |
+| Q1 | Should new work go straight to `main`, or on a branch with a PR per milestone? | A branch cut from `main` per milestone; do not open a PR without a yes. |
 | Q2 | Can you run the on-phone self-tests and checklists on the OnePlus 13 and send screenshots, and how quickly? | Assume yes, within a day; batch phone requests per milestone. |
 | Q3 | For rotation (B2): lock the app to portrait, let the activity handle configuration changes itself, or save full state so it also survives Android killing the app? | Handle configuration changes in the manifest and save only the open screen and shared files; full editor state restore is not attempted. |
 | Q4 | For redaction (B1): is it acceptable that extra pages lose selectable text when they share content with a hidden page? | Yes: correctness of hiding beats keeping text selectable. |
